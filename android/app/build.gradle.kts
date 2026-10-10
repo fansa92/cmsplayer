@@ -1,3 +1,8 @@
+// 必须显式 import：AGP 会应用 java-base 插件，使脚本作用域里存在名为 java 的扩展，
+// 于是 java.util.Properties() 会被 Kotlin 当成 (project.java).util.Properties() 解析，
+// 报 "Unresolved reference 'util'"，并级联出一串 "Cannot infer type"。
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -21,7 +26,7 @@ plugins {
 // storeType 默认取 PKCS12：JDK 9 起 keytool 与 openssl 的默认输出都是 PKCS12，
 // 显式写死可以彻底摆脱"AGP 到底按什么格式读"的猜测。手上有真正的 JKS 时改成 JKS。
 // ---------------------------------------------------------------------------
-val keystoreProperties = java.util.Properties()
+val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
@@ -56,9 +61,10 @@ android {
                 keyAlias = keystoreProperties.getProperty("keyAlias", "")
                 keyPassword = keystoreProperties.getProperty("keyPassword", "")
                 storePassword = keystoreProperties.getProperty("storePassword", "")
-                storeFile = keystoreProperties.getProperty("storeFile")?.let { storePath ->
-                    rootProject.file(storePath)
-                }
+                // 用显式 val + if 替代 ?.let：?.let 的返回类型推断在脚本编译期
+                // 容易因上游类型未知而报 "Cannot infer type for type parameter"。
+                val storePath = keystoreProperties.getProperty("storeFile", "")
+                storeFile = if (storePath.isEmpty()) null else rootProject.file(storePath)
             }
         }
     }
