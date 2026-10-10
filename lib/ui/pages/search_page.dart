@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/utils/debouncer.dart';
 import '../../data/models/vod_item.dart';
 import '../../data/models/vod_source.dart';
 import '../../state/app_state.dart';
@@ -23,7 +22,6 @@ class _SearchPageState extends State<SearchPage>
     with AutomaticKeepAliveClientMixin {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
-  final Debouncer _debouncer = Debouncer(const Duration(milliseconds: 450));
 
   @override
   bool get wantKeepAlive => true;
@@ -38,24 +36,20 @@ class _SearchPageState extends State<SearchPage>
 
   @override
   void dispose() {
-    _debouncer.dispose();
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
-  Future<void> _search(String text, {bool immediate = false}) async {
+  /// 手动搜索：只有回车、搜索按钮、切换多源、点历史记录才会真的发请求。
+  ///
+  /// 打字过程不再自动搜（原先 450ms 去抖逐字触发），既省请求，也避免
+  /// 快速敲字时对同一源站连打多次而触发 WAF 降级。
+  Future<void> _search(String text) async {
     final String q = text.trim();
     final SearchStore store = context.read<SearchStore>();
     if (q.isEmpty) {
-      _debouncer.cancel();
       store.clearResult();
-      return;
-    }
-    if (immediate) {
-      _debouncer.cancel();
-    } else {
-      _debouncer.run(() => _execute(q));
       return;
     }
     await _execute(q);
@@ -85,27 +79,45 @@ class _SearchPageState extends State<SearchPage>
       children: <Widget>[
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-          child: TextField(
-            controller: _controller,
-            focusNode: _focusNode,
-            textInputAction: TextInputAction.search,
-            onChanged: _search,
-            onSubmitted: (String v) => _search(v, immediate: true),
-            decoration: InputDecoration(
-              hintText: '搜索影片、剧集…',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: _controller.text.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: '清空',
-                      icon: const Icon(Icons.clear),
-                      onPressed: () {
-                        _controller.clear();
-                        _search('');
-                        setState(() {});
-                      },
-                    ),
-            ),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  textInputAction: TextInputAction.search,
+                  // 打字只刷新清空按钮的显隐，不发请求。
+                  onChanged: (_) => setState(() {}),
+                  onSubmitted: _search,
+                  decoration: InputDecoration(
+                    hintText: '搜索影片、剧集…',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _controller.text.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: '清空',
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              _controller.clear();
+                              _search('');
+                              setState(() {});
+                            },
+                          ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonalIcon(
+                // 与输入框等高，否则 40px 的按钮贴着 56px 的框会显得没对齐。
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(56, 56),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                ),
+                onPressed: () => _search(_controller.text),
+                icon: const Icon(Icons.search),
+                label: const Text('搜索'),
+              ),
+            ],
           ),
         ),
         if (sourceStore.enabledSources.length > 1)
@@ -119,7 +131,7 @@ class _SearchPageState extends State<SearchPage>
                   onSelected: (bool v) {
                     store.setMultiSource(v);
                     context.read<AppState>().setMultiSourceSearch(v);
-                    if (store.query.isNotEmpty) _search(store.query, immediate: true);
+                    if (store.query.isNotEmpty) _search(store.query);
                   },
                 ),
                 const SizedBox(width: 10),
@@ -228,7 +240,7 @@ class _HistoryPanel extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 24),
             child: Text(
-              '输入片名开始搜索。多源模式下会同时查询所有已启用的资源站并合并结果。',
+              '输入片名后按回车或点「搜索」。多源模式下会同时查询所有已启用的资源站并合并结果。',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -255,6 +267,6 @@ class _HistoryPanel extends StatelessWidget {
     final _SearchPageState? state =
         context.findAncestorStateOfType<_SearchPageState>();
     state?._controller.text = q;
-    state?._search(q, immediate: true);
+    state?._search(q);
   }
 }

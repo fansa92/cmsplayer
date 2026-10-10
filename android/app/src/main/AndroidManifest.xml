@@ -1,8 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 资源站接口必须联网。
+         注意：Flutter 生成的模板只在 debug / profile 变体里给了这条权限，
+         release 变体必须自己声明，否则 CI 出的正式包完全无法访问网络。 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
         android:label="cms_player"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
+        <!-- usesCleartextTraffic：用户可自行添加任意 CMS 资源站，其中相当一部分
+             仍是 http:// 源。Android 9+ 默认拦截明文流量，不放开这些源会全部失败。 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

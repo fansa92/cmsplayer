@@ -242,6 +242,23 @@ class _PlayerControlsState extends State<PlayerControls> {
     _show();
   }
 
+  /// 移动端横竖屏切换；桌面窗口有自己的尺寸控制，用不上这个。
+  ///
+  /// 只声明目标方向，系统转过去后 `MediaQuery` 会随之变化，按钮图标自己翻转。
+  /// 退出播放页时 `PlayerPage._exitPlaybackUi` 会把允许方向恢复成竖屏 + 横屏，
+  /// 因此这里锁死的方向不会带出播放页。
+  Future<void> _toggleOrientation() async {
+    final bool toLandscape =
+        MediaQuery.orientationOf(context) != Orientation.landscape;
+    await SystemChrome.setPreferredOrientations(toLandscape
+        ? const <DeviceOrientation>[
+            DeviceOrientation.landscapeLeft,
+            DeviceOrientation.landscapeRight,
+          ]
+        : const <DeviceOrientation>[DeviceOrientation.portraitUp]);
+    _show();
+  }
+
   // ---------------------------------------------------------------- 构建
 
   @override
@@ -330,6 +347,8 @@ class _PlayerControlsState extends State<PlayerControls> {
 
   Widget _buildTopBar(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final bool isLandscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
     return Positioned(
       left: 0,
       right: 0,
@@ -383,6 +402,15 @@ class _PlayerControlsState extends State<PlayerControls> {
                 ],
               ),
             ),
+            if (PlatformInfo.isMobile)
+              IconButton(
+                tooltip: isLandscape ? '切换到竖屏' : '横屏播放',
+                color: Colors.white,
+                icon: Icon(isLandscape
+                    ? Icons.stay_current_portrait
+                    : Icons.stay_current_landscape),
+                onPressed: _toggleOrientation,
+              ),
             if (PlatformInfo.isDesktop)
               IconButton(
                 tooltip: _fullScreen ? '退出全屏 (Esc)' : '全屏 (F)',

@@ -77,10 +77,14 @@ class PlayerController extends ChangeNotifier {
 
   bool _adjustingVolume = false;
   bool _adjustingBrightness = false;
-  double _volumeBase = 0;
-  double _brightnessBase = 0;
-  double _volumeDelta = 0;
-  double _brightnessDelta = 0;
+
+  /// 手势进行中的音量 / 亮度取值（0..1）。
+  ///
+  /// 每次事件都在**上一次的结果**上累加增量。`DragUpdateDetails.primaryDelta`
+  /// 是相对上一帧的增量而非整段位移，若写成"起点 + 最后一下的增量"，
+  /// 整段滑动就只有最后一帧的幅度生效，表现为拖满屏也几乎没反应。
+  double _gestureVolume = 0;
+  double _gestureBrightness = 0;
 
   bool _disposed = false;
   DateTime _lastHistoryWrite = DateTime.fromMillisecondsSinceEpoch(0);
@@ -377,8 +381,12 @@ class PlayerController extends ChangeNotifier {
   void updateSeek(Duration delta) {
     if (!_seeking) return;
     if (_duration.inMilliseconds <= 0) return;
-    final int ms =
-        (_position + delta).inMilliseconds.clamp(0, _duration.inMilliseconds);
+    // delta 是"相对上一帧"的增量，必须累加到上一次的目标上。
+    // 之前写成 `_position + delta`，整段拖动只按最后一下的幅度生效，
+    // 拖满屏进度条也几乎不动。
+    final int ms = (_seekTarget + delta)
+        .inMilliseconds
+        .clamp(0, _duration.inMilliseconds);
     _seekTarget = Duration(milliseconds: ms);
     _emit();
   }
@@ -401,12 +409,10 @@ class PlayerController extends ChangeNotifier {
     if (_adjustingVolume || _adjustingBrightness) return;
     try {
       if (isVolume) {
-        _volumeBase = await VolumeController.instance.getVolume();
-        _volumeDelta = 0;
+        _gestureVolume = await VolumeController.instance.getVolume();
         _adjustingVolume = true;
       } else {
-        _brightnessBase = await ScreenBrightness.instance.application;
-        _brightnessDelta = 0;
+        _gestureBrightness = await ScreenBrightness.instance.application;
         _adjustingBrightness = true;
       }
     } on Object catch (e) {
@@ -415,21 +421,22 @@ class PlayerController extends ChangeNotifier {
     _emit();
   }
 
+  /// [delta] 是自上一帧以来的位移（归一化到 0..1），必须累加到当前值上。
   Future<void> updateVerticalGesture(double delta) async {
     if (_adjustingVolume) {
-      _volumeDelta = delta;
-      final double v = (_volumeBase + delta).clamp(0.0, 1.0);
+      _gestureVolume = (_gestureVolume + delta).clamp(0.0, 1.0);
       try {
-        await VolumeController.instance.setVolume(v);
+        await VolumeController.instance.setVolume(_gestureVolume);
       } on Object {
         // 平台不支持时静默忽略。
       }
       _emit();
     } else if (_adjustingBrightness) {
-      _brightnessDelta = delta;
-      final double b = (_brightnessBase + delta).clamp(0.0, 1.0);
+      _gestureBrightness = (_gestureBrightness + delta).clamp(0.0, 1.0);
       try {
-        await ScreenBrightness.instance.setApplicationScreenBrightness(b);
+        await ScreenBrightness.instance.setApplicationScreenBrightness(
+          _gestureBrightness,
+        );
       } on Object {
         // 平台不支持时静默忽略。
       }
@@ -440,16 +447,13 @@ class PlayerController extends ChangeNotifier {
   Future<void> endVerticalGesture() async {
     _adjustingVolume = false;
     _adjustingBrightness = false;
-    _volumeDelta = 0;
-    _brightnessDelta = 0;
     _emit();
   }
 
   bool get adjustingVolume => _adjustingVolume;
   bool get adjustingBrightness => _adjustingBrightness;
-  double get gestureVolume => (_volumeBase + _volumeDelta).clamp(0.0, 1.0);
-  double get gestureBrightness =>
-      (_brightnessBase + _brightnessDelta).clamp(0.0, 1.0);
+  double get gestureVolume => _gestureVolume;
+  double get gestureBrightness => _gestureBrightness;
 
   // ---------------------------------------------------------------- 历史
 
