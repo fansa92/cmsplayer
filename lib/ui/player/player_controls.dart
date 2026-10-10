@@ -84,11 +84,14 @@ class _PlayerControlsState extends State<PlayerControls> {
     });
   }
 
-  void _show() {
+  /// 显示控制栏并重置自动隐藏计时。
+  ///
+  /// [grabFocus] 只有在用户**点击画面**这类明确意图时才为 true：鼠标移动
+  /// 不该把焦点从打开的选集面板手里抢走，而点击时抢回来才能保证快捷键可用
+  /// （焦点已在此节点时该调用是空操作）。
+  void _show({bool grabFocus = true}) {
     if (!mounted) return;
-    // 键盘控制的前提是焦点在这层。顶栏按钮、选集面板都可能把焦点抢走，
-    // 所以每次交互都顺手抢回来（焦点已在本节点时是空操作）。
-    _focusNode.requestFocus();
+    if (grabFocus) _focusNode.requestFocus();
     // 鼠标移动会以很高的频率调到这里，已经可见时只重置定时器即可，
     // 无谓的 setState 会让整个控制层跟着指针抖动重建。
     if (!_visible) setState(() => _visible = true);
@@ -250,11 +253,9 @@ class _PlayerControlsState extends State<PlayerControls> {
       // translucent：不吞掉子节点的命中，自己也照样收到悬停事件。
       child: Listener(
         behavior: HitTestBehavior.translucent,
-        // 锁定时不重置自动隐藏计时也无妨（锁定分支根本不渲染面板），
-        // 故意不在这里读 controller.locked —— 那是 ListenableBuilder 的事，
-        // 放在外层会拿到陈旧值。
+        // 悬停只做显示，不抢焦点：此时选集面板可能正开着。
         onPointerHover: PlatformInfo.isDesktop
-            ? (PointerHoverEvent _) => _show()
+            ? (PointerHoverEvent _) => _show(grabFocus: false)
             : null,
         child: _buildStack(context),
       ),
