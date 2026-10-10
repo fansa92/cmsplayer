@@ -110,9 +110,9 @@ class _PlayerControlsState extends State<PlayerControls> {
   }
 
   Future<void> _stepVolume(double delta) async {
-    await controller.stepVolume(delta);
-    if (!mounted) return;
-    _showOsd('音量 ${controller.volume.round()}%');
+    final double? applied = await controller.stepVolume(delta);
+    if (!mounted || applied == null) return;
+    _showOsd('音量 ${applied.round()}%');
     _show();
   }
 

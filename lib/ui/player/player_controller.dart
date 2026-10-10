@@ -86,6 +86,12 @@ class PlayerController extends ChangeNotifier {
   double _gestureVolume = 0;
   double _gestureBrightness = 0;
 
+  /// 最近一次已知的**系统**音量（0..100），未知时为 -1。
+  ///
+  /// 手势与键盘调的是同一个东西（系统音量），共用这份缓存读数，
+  /// 否则会出现"手势显示 70%、键盘显示 100%"两套互相矛盾的数字。
+  double _systemVolume = -1;
+
   bool _disposed = false;
   DateTime _lastHistoryWrite = DateTime.fromMillisecondsSinceEpoch(0);
   bool _resumeApplied = false;
@@ -316,18 +322,26 @@ class PlayerController extends ChangeNotifier {
     await _player.setRate(value);
   }
 
-  /// 音量步进，供键盘 / 滚轮使用。[deltaPercent] 为百分点，例如 `5` / `-5`。
+  /// 音量步进，供键盘使用。[deltaPercent] 为百分点，例如 `5` / `-5`。
   ///
-  /// 与手势用的 [startVerticalGesture] 分开：手势是"绝对比例"（跟手），
-  /// 键盘是"相对步进"，两者共用会互相覆盖。
-  Future<void> stepVolume(double deltaPercent) async {
-    final double v = (_volume + deltaPercent).clamp(0.0, 100.0);
-    _volume = v;
-    _emit();
+  /// 调的是**系统**音量，与手势 [startVerticalGesture] 同一条通路
+  /// （`volume_controller` 在本项目支持的五个平台上都可用），
+  /// 而不是 media_kit 的播放器音量 —— 后者会和手势读数对不上。
+  ///
+  /// 返回应用后的音量（0..100），平台不支持时返回 null，调用方据此不显示提示。
+  Future<double?> stepVolume(double deltaPercent) async {
     try {
-      await _player.setVolume(v);
-    } on Object {
-      // 平台不支持时静默忽略。
+      final double base = _systemVolume >= 0
+          ? _systemVolume / 100
+          : await VolumeController.instance.getVolume();
+      final double next = (base + deltaPercent / 100).clamp(0.0, 1.0);
+      await VolumeController.instance.setVolume(next);
+      _systemVolume = next * 100;
+      _emit();
+      return _systemVolume;
+    } on Object catch (e) {
+      AppLog.d('Player', 'stepVolume failed: $e');
+      return null;
     }
   }
 
@@ -409,7 +423,9 @@ class PlayerController extends ChangeNotifier {
     if (_adjustingVolume || _adjustingBrightness) return;
     try {
       if (isVolume) {
-        _gestureVolume = await VolumeController.instance.getVolume();
+        final double v = await VolumeController.instance.getVolume();
+        _gestureVolume = v;
+        _systemVolume = v * 100; // 与键盘步进共享读数
         _adjustingVolume = true;
       } else {
         _gestureBrightness = await ScreenBrightness.instance.application;
@@ -454,6 +470,9 @@ class PlayerController extends ChangeNotifier {
   bool get adjustingBrightness => _adjustingBrightness;
   double get gestureVolume => _gestureVolume;
   double get gestureBrightness => _gestureBrightness;
+
+  /// 系统音量（0..100），-1 表示尚未读到过。
+  double get systemVolume => _systemVolume;
 
   // ---------------------------------------------------------------- 历史
 
