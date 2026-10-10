@@ -1,0 +1,427 @@
+name: 构建全平台发行版
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      skip_apple:
+        description: "跳过 macOS / iOS 构建（macOS runner 按 10 倍分钟计费）"
+        type: boolean
+        default: false
+
+# 默认只读，只有 release 任务单独提权，避免 token 权限过大
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 与本地验证过的版本保持一致，避免 SDK 升级引入未知问题
+  FLUTTER_VERSION: '3.47.6'
+  BUNDLETOOL_VERSION: '1.18.3'
+
+jobs:
+  # ====================================================================
+  # 质量门禁：不通过就不浪费后面五个平台的构建时间
+  # ====================================================================
+  quality:
+    name: 静态检查与单元测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: 获取依赖
+        run: flutter pub get
+
+      - name: 静态分析
+        run: dart analyze
+
+      - name: 单元测试
+        run: flutter test
+
+  # ====================================================================
+  # 版本号：打了 v1.2.3 标签就用标签，否则用 pubspec 版本 + 短 commit
+  # ====================================================================
+  meta:
+    name: 解析版本号
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            base="$(sed -n 's/^version: *//p' pubspec.yaml | cut -d+ -f1)"
+            version="${base}-dev.${GITHUB_SHA::7}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "版本号 -> $version"
+
+  # ====================================================================
+  # Android：AAB -> bundletool .apks（全架构）+ 按 ABI 拆分的多架构 APK
+  # 唯一自签的平台
+  # ====================================================================
+  android:
+    name: Android (.apks + 多架构 APK)
+    needs: [quality, meta]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: 接受 Android SDK / NDK 许可
+        shell: bash
+        run: |
+          sdkmanager="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [[ -x "$sdkmanager" ]]; then
+            yes | "$sdkmanager" --licenses > /dev/null || true
+            echo "SDK 许可已接受"
+          else
+            echo "未找到 sdkmanager，跳过（ runner 可能已接受过许可）"
+          fi
+
+      - name: 获取依赖
+        run: flutter pub get
+
+      # ---------------------------------------------------------- 自签密钥
+      - name: 准备自签密钥
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ks="$RUNNER_TEMP/release.jks"
+          storepass="${ANDROID_KEYSTORE_PASSWORD:-cmsplayer-ci}"
+          alias="${ANDROID_KEY_ALIAS:-cmsplayer}"
+          keypass="${ANDROID_KEY_PASSWORD:-$storepass}"
+
+          if [[ -n "${ANDROID_KEYSTORE_B64:-}" ]]; then
+            printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > "$ks"
+            echo "使用仓库 Secret 中保存的密钥（多次发布的签名一致，可覆盖安装）"
+          else
+            keytool -genkeypair -v \
+              -keystore "$ks" -storetype PKCS12 \
+              -storepass "$storepass" -keypass "$keypass" \
+              -alias "$alias" \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=CMSPlayer CI, OU=Self-Signed, O=CMSPlayer, L=NA, S=NA, C=US"
+            echo "本次运行新生成的自签密钥（每次签名都不同）"
+            echo "提示：配置 ANDROID_KEYSTORE_B64 等 Secret 可让签名跨版本保持一致"
+          fi
+
+          # storeType 写死 PKCS12：不管 keystore 是 CI 现签的还是 Secret 里那份
+          # （openssl 产物或 keytool 产物）都是 PKCS12，格式不再依赖 AGP 的默认猜测。
+          printf 'storeType=PKCS12\nstorePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=%s\n' \
+            "$storepass" "$keypass" "$alias" "$ks" > android/key.properties
+
+          {
+            echo "KS_PATH=$ks"
+            echo "KS_PASS=$storepass"
+            echo "KS_ALIAS=$alias"
+            echo "KEY_PASS=$keypass"
+          } >> "$GITHUB_ENV"
+
+      # ------------------------------------------------------------- 构建
+      - name: 构建 App Bundle（AAB）
+        run: flutter build appbundle --release
+
+      - name: 构建多架构 APK（按 ABI 拆分）
+        run: flutter build apk --split-per-abi --release
+
+      - name: 生成 .apks 并整理产物
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ needs.meta.outputs.version }}"
+          mkdir -p "dist/CMSPlayer-$v-android-abi-splits"
+
+          jar="$RUNNER_TEMP/bundletool.jar"
+          curl -fsSL -o "$jar" \
+            "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar"
+
+          aab="$(find build/app/outputs/bundle/release -name '*.aab' -print -quit)"
+          if [[ -z "$aab" ]]; then
+            echo "错误: 没有找到 AAB，请检查 flutter build appbundle 是否成功" >&2
+            exit 1
+          fi
+          java -jar "$jar" build-apks \
+            --bundle="$aab" \
+            --output="dist/CMSPlayer-$v-android.apks" \
+            --mode=universal \
+            --overwrite \
+            --ks="$KS_PATH" \
+            --ks-pass="pass:$KS_PASS" \
+            --ks-key-alias="$KS_ALIAS" \
+            --key-pass="pass:$KEY_PASS"
+
+          # .apks 本质是 zip，universal.apk 里含全部 ABI，解出来方便手动安装
+          unzip -o -j "dist/CMSPlayer-$v-android.apks" universal.apk -d dist
+          mv "dist/universal.apk" "dist/CMSPlayer-$v-android-universal.apk"
+
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            cp "build/app/outputs/flutter-apk/app-$abi-release.apk" \
+               "dist/CMSPlayer-$v-android-abi-splits/CMSPlayer-$abi.apk"
+          done
+
+          find dist -type f -printf '  %10s  %p\n'
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+
+  # ====================================================================
+  # Windows：Release 目录整体压 zip，不签名
+  # ====================================================================
+  windows:
+    name: Windows (.zip)
+    needs: [quality, meta]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: 获取依赖
+        run: flutter pub get
+
+      - name: 构建 Windows 发行版
+        run: flutter build windows --release
+
+      - name: 打包 zip
+        shell: pwsh
+        run: |
+          $v = "${{ needs.meta.outputs.version }}"
+          $stage = "dist/CMSPlayer-windows-x64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "build/windows/x64/runner/Release/*" $stage -Recurse -Force
+          Compress-Archive -Path $stage -DestinationPath "dist/CMSPlayer-$v-windows-x64.zip" -Force
+          Get-ChildItem -Recurse dist | Select-Object FullName, Length
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  # ====================================================================
+  # macOS：DMG，项目里三套构建配置的 CODE_SIGN_IDENTITY 已是 "-"
+  # （ad-hoc），没有 Apple 开发者证书、也不做公证
+  # ====================================================================
+  macos:
+    name: macOS (.dmg)
+    needs: [quality, meta]
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_apple }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          architecture: arm64
+          cache: true
+
+      - name: 获取依赖
+        run: flutter pub get
+
+      - name: 构建 macOS 应用
+        run: flutter build macos --release
+
+      - name: 打包 DMG（ad-hoc 签名，无 Apple 证书、未公证）
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ needs.meta.outputs.version }}"
+          stage="$RUNNER_TEMP/dmg"
+          mkdir -p "$stage" dist
+          cp -R build/macos/Build/Products/Release/*.app "$stage/"
+          ln -s /Applications "$stage/Applications"
+          hdiutil create -volname "CMSPlayer" -srcfolder "$stage" -ov -format UDZO \
+            "dist/CMSPlayer-$v-macos-universal.dmg"
+          ls -lh dist
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.dmg
+          if-no-files-found: error
+          compression-level: 0
+
+  # ====================================================================
+  # Linux：把 GTK / Cairo / Pango 等系统库收进 lib/ 并改写 RPATH，
+  # 做成解压即用的免依赖包（仅 glibc 必须来自系统）
+  # ====================================================================
+  linux:
+    name: Linux 免依赖版 (.tar.gz)
+    needs: [quality, meta]
+    # 显式钉住 24.04：ubuntu-latest 自 2026-10 起切到 26.04，
+    # glibc 版本会跟着变，免依赖包的最低 glibc 要求也就跟着变。
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang cmake ninja-build pkg-config libgtk-3-dev patchelf file
+
+      - name: 获取依赖
+        run: flutter pub get
+
+      - name: 构建 Linux 发行版
+        run: flutter build linux --release
+
+      - name: 打包免依赖发行版
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ needs.meta.outputs.version }}"
+          bash .github/scripts/bundle-linux.sh build/linux/x64/release/bundle
+
+          mkdir -p dist
+          mv build/linux/x64/release/bundle "dist/CMSPlayer-linux-x64"
+          tar -C dist -czf "dist/CMSPlayer-$v-linux-x64-portable.tar.gz" CMSPlayer-linux-x64
+          rm -rf "dist/CMSPlayer-linux-x64"
+          ls -lh dist
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+  # ====================================================================
+  # iOS：--no-codesign，只打成未签名 IPA 供后续自行重签
+  # ====================================================================
+  ios:
+    name: iOS (.ipa，未签名)
+    needs: [quality, meta]
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_apple }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          architecture: arm64
+          cache: true
+
+      - name: 获取依赖
+        run: flutter pub get
+
+      - name: 构建 iOS 应用（不签名）
+        run: flutter build ios --release --no-codesign
+
+      - name: 打包 IPA（未签名）
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ needs.meta.outputs.version }}"
+          work="$RUNNER_TEMP/ipa"
+          mkdir -p "$work/Payload" dist
+          cp -R build/ios/iphoneos/Runner.app "$work/Payload/"
+          (cd "$work" && zip -qry "$GITHUB_WORKSPACE/dist/CMSPlayer-$v-ios-unsigned.ipa" Payload)
+          ls -lh dist
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: dist/*.ipa
+          if-no-files-found: error
+          compression-level: 0
+
+  # ====================================================================
+  # 发布：只有打 v* 标签时才创建 GitHub Release
+  # ====================================================================
+  release:
+    name: 发布到 GitHub Releases
+    needs: [quality, meta, android, windows, macos, linux, ios]
+    # macos / ios 可能被 skip_apple 跳过，这里要显式放行
+    if: |
+      always() &&
+      !cancelled() &&
+      startsWith(github.ref, 'refs/tags/v') &&
+      needs.quality.result == 'success' &&
+      needs.meta.result == 'success' &&
+      needs.android.result == 'success' &&
+      needs.windows.result == 'success' &&
+      needs.linux.result == 'success' &&
+      (needs.macos.result == 'success' || needs.macos.result == 'skipped') &&
+      (needs.ios.result == 'success' || needs.ios.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 汇总所有产物
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 列出待发布文件
+        run: find dist -type f -printf '%10s  %p\n' | sort -k2
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: CMSPlayer ${{ needs.meta.outputs.version }}
+          files: dist/**
+          fail_on_unmatched_files: true
+          generate_release_notes: true
