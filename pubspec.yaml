@@ -1,0 +1,42 @@
+name: cms_player
+description: >-
+  CMSPlayer 风格的跨平台 VOD 播放器。支持 macCMS / 苹果CMS 资源站，
+  可运行于 Windows / macOS / Linux / Android / iOS。
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ---------- 播放内核（libmpv，全平台一致的解码能力） ----------
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
+  media_kit_libs_video: ^1.0.5
+
+  # ---------- 网络 ----------
+  http: ^1.2.2
+  crypto: ^3.0.3
+
+  # ---------- 状态管理 / 持久化 ----------
+  provider: ^6.1.2
+  shared_preferences: ^2.3.3
+  path_provider: ^2.1.5
+  path: ^1.9.0
+
+  # ---------- 播放器辅助（音量 / 亮度 / 常亮） ----------
+  screen_brightness: ^2.1.11
+  volume_controller: ^3.7.1
+  wakelock_plus: ^1.2.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

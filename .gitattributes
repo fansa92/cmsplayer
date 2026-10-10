@@ -1,0 +1,21 @@
+# 统一按 LF 提交，避免 Windows 上 autocrlf 把 shell 脚本弄成 CRLF
+# （CRLF 的 .sh 在 Linux 上会报 "bad interpreter: /bin/bash^M"）
+* text=auto
+
+*.sh   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.dart text eol=lf
+*.kt   text eol=lf
+*.kts  text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+
+# 二进制，别做任何换行转换
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.jar  binary
+*.p12  binary
+*.pfx  binary
+*.zip  binary
