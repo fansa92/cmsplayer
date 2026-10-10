@@ -38,6 +38,10 @@ class K {
   /// 控制栏自动隐藏延时。
   static const Duration controlsHideDelay = Duration(seconds: 4);
 
+  /// 开播兜底超时：超过该时长仍没收到 playing / duration，
+  /// 也强制收起"正在准备"转圈，把播放按钮还给用户。
+  static const Duration startupTimeout = Duration(seconds: 20);
+
   /// 播放记录写盘节流间隔。
   static const Duration historyThrottle = Duration(seconds: 8);
 

@@ -57,7 +57,7 @@ class HomePage extends StatelessWidget {
             subtitle: '${browse.categoryTitle} · 共 ${browse.total} 部',
             onRefresh: () => browse.refresh(force: true),
           ),
-          if (browse.categories.isNotEmpty)
+          if (browse.selectableCategories.isNotEmpty)
             _CategoryChips(browse: browse),
           const SizedBox(height: 4),
           Expanded(
@@ -147,7 +147,7 @@ class _CategoryChips extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<VodCategory> categories =
-        browse.categories.take(14).toList();
+        browse.selectableCategories.take(14).toList();
     if (categories.isEmpty) return const SizedBox.shrink();
 
     return SizedBox(

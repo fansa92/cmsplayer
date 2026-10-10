@@ -30,6 +30,10 @@ class BrowseStore extends ChangeNotifier {
   // ---------------- getters ----------------
   VodSource? get source => _source;
   List<VodCategory> get categories => _categories;
+
+  /// 可供点击的分类。详见 [VodCategory.leafOnly]。
+  List<VodCategory> get selectableCategories =>
+      VodCategory.leafOnly(_categories);
   int get typeId => _typeId;
   String get year => _year;
   String get area => _area;
@@ -93,17 +97,10 @@ class BrowseStore extends ChangeNotifier {
     _emit();
 
     try {
-      if (_categories.isEmpty) {
-        try {
-          final List<VodCategory> cats =
-              await VodRepository.instance.refreshCategories(source);
-          _categories = cats;
-          _emit();
-        } on Object catch (e) {
-          AppLog.d('Browse', 'categories failed: $e');
-        }
-      }
-
+      // 先拉列表：macCMS 的任意一次响应都带 class，分类可以顺带拿到。
+      // 原来的顺序是先单独拉一次分类、再拉列表，冷启动会连着打两个请求，
+      // 而部分资源站（实测 cj.ffzyapi.com）对短时间连发请求会降级返回，
+      // 把第二个请求（也就是真正要展示的列表）挤成失败。
       final VodPage page = await VodRepository.instance.query(
         source: source,
         pageNo: 1,
@@ -119,7 +116,20 @@ class BrowseStore extends ChangeNotifier {
 
       if (_categories.isEmpty && page.categories.isNotEmpty) {
         _categories = page.categories;
+        _emit();
       }
+
+      // 列表响应确实没带 class 时才补一次分类请求。
+      if (_categories.isEmpty) {
+        try {
+          _categories =
+              await VodRepository.instance.refreshCategories(source);
+          _emit();
+        } on Object catch (e) {
+          AppLog.d('Browse', 'categories failed: $e');
+        }
+      }
+
       _items = page.items;
       _pageNo = page.page;
       _pageCount = page.pageCount;

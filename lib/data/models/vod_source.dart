@@ -86,7 +86,17 @@ class VodSource {
   /// 接口地址的源站，例如 `https://example.com`。
   String get origin => originOf(api);
 
-  bool get isUsable => api.isNotEmpty && id.isNotEmpty;
+  /// 是否可用：接口地址非空，且确实是 http(s) 直连地址。
+  ///
+  /// 官方源列表里混着 `cms://ddys`、`cms://zxzj` 这种站点私有协议，
+  /// 它们不是 macCMS HTTP 接口，`Uri.tryParse` 也认（scheme=cms、host=ddys），
+  /// 放进来只会在请求时抛 `Unsupported scheme`，表现为"主页加载失败"。
+  bool get isUsable {
+    if (api.isEmpty || id.isEmpty) return false;
+    final Uri? uri = Uri.tryParse(api);
+    if (uri == null || uri.host.isEmpty) return false;
+    return uri.scheme == 'http' || uri.scheme == 'https';
+  }
 
   /// 请求头。Referer 为空时用源站兜底，很多资源站会拒绝无 Referer 的请求。
   Map<String, String> get headers {

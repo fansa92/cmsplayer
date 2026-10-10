@@ -64,6 +64,9 @@ class PlayerController extends ChangeNotifier {
   String? _error;
   bool _starting = true;
 
+  /// 兜底定时器：网络卡死时也要把控制栏放出来，避免无限转圈。
+  Timer? _startupTimer;
+
   double _rate = 1.0;
   double _volume = 100.0;
   bool _locked = false;
@@ -126,6 +129,20 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 结束"正在准备"状态。
+  ///
+  /// [_starting] 只在 [_openCurrent] 里置 true，此前只有出错分支会把它置回
+  /// false；播放一旦正常启动就再没人清理它。而控制层是
+  /// `buffering || starting` 就渲染中央转圈、否则才渲染播放/暂停按钮，
+  /// 所以这个字段卡住会造成两个现象：转圈永远不停、暂停按钮永远不出现。
+  void _clearStarting(String reason) {
+    if (!_starting) return;
+    _starting = false;
+    _startupTimer?.cancel();
+    _startupTimer = null;
+    AppLog.d('Player', 'starting cleared by $reason');
+  }
+
   // ---------------------------------------------------------------- 绑定
 
   void _bindStreams() {
@@ -137,10 +154,13 @@ class PlayerController extends ChangeNotifier {
     }));
     _subs.add(_player.stream.duration.listen((Duration d) {
       _duration = d;
+      // 拿到时长说明媒体已加载完毕，"正在准备"到此为止。
+      if (d > Duration.zero) _clearStarting('duration');
       _emit();
     }));
     _subs.add(_player.stream.playing.listen((bool p) {
       _playing = p;
+      if (p) _clearStarting('playing');
       _emit();
     }));
     _subs.add(_player.stream.buffering.listen((bool b) {
@@ -206,6 +226,8 @@ class PlayerController extends ChangeNotifier {
 
     _error = null;
     _starting = true;
+    _startupTimer?.cancel();
+    _startupTimer = null;
     _completed = false;
     _resumeApplied = false;
     _position = Duration.zero;
@@ -219,6 +241,15 @@ class PlayerController extends ChangeNotifier {
         play: true,
       );
       await _player.setRate(_rate);
+      // 正常情况下 playing / duration 流会立刻清掉 _starting；
+      // 这里再挂一道兜底，防止流不触发时控制栏被永久遮住。
+      _startupTimer?.cancel();
+      _startupTimer = Timer(K.startupTimeout, () {
+        if (_starting) {
+          _clearStarting('timeout');
+          _emit();
+        }
+      });
     } on Object catch (e) {
       AppLog.e('Player', 'open failed: $e');
       if (_disposed) return;
@@ -466,6 +497,8 @@ class PlayerController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _startupTimer?.cancel();
+    _startupTimer = null;
     for (final StreamSubscription<Object?> sub in _subs) {
       unawaited(sub.cancel());
     }

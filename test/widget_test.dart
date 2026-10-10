@@ -1,10 +1,14 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:cms_player/core/utils/text_utils.dart';
 import 'package:cms_player/core/utils/formatter.dart';
 import 'package:cms_player/data/api/maccms_api.dart';
+import 'package:cms_player/data/api/source_importer.dart';
 import 'package:cms_player/data/models/play_line.dart';
 import 'package:cms_player/data/models/paged_result.dart';
+import 'package:cms_player/data/models/vod_category.dart';
 import 'package:cms_player/data/models/vod_item.dart';
 import 'package:cms_player/data/models/vod_source.dart';
 
@@ -138,6 +142,122 @@ void main() {
       expect(formatDuration(const Duration(seconds: 65)), '1:05');
       expect(formatDuration(const Duration(hours: 1, minutes: 2, seconds: 3)),
           '1:02:03');
+    });
+  });
+
+  group('SourceImporter 宽容解析', () {
+    test('官方 source.json 的尾逗号不再报"不是合法的 JSON"', () {
+      // 官方 cms-player/vod-source/source.json 的真实格式：
+      // 若干对象的最后一个属性后面带着逗号（该文件实测 4 处）。
+      const String official = '''
+      [
+          {
+              "name": "黑木耳",
+              "api": "https://json.heimuer.xyz/api.php/provide/vod/",
+          },
+          {
+              "name": "华为吧",
+              "api": "https://hw8.live/api.php/provide/vod/",
+          },
+          {
+              "name": "极速资源",
+              "api": "https://jszyapi.com/api.php/provide/vod/"
+          }
+      ]
+      ''';
+
+      // 标准解析必须失败，否则这条用例证明不了问题存在。
+      expect(() => jsonDecode(official), throwsA(isA<FormatException>()));
+
+      final List<VodSource> sources = SourceImporter.parse(official);
+      expect(sources.length, 3);
+      expect(sources[0].name, '黑木耳');
+      expect(sources[0].api, 'https://json.heimuer.xyz/api.php/provide/vod/');
+      expect(sources[1].name, '华为吧');
+      expect(sources[2].api, 'https://jszyapi.com/api.php/provide/vod/');
+    });
+
+    test('支持注释，且不误伤字符串内的逗号与斜杠', () {
+      const String text = '''
+      {
+        // 资源站列表
+        "sources": [
+          {
+            "name": "示例站",
+            /* 接口地址 */
+            "api": "https://a.com/api.php/provide/vod/",
+          },
+          {
+            "name": "带逗号",
+            "api": "https://b.com/api.php/provide/vod/?a=1,2#x"
+          }
+        ]
+      }
+      ''';
+
+      final List<VodSource> sources = SourceImporter.parse(text);
+      expect(sources.length, 2);
+      expect(sources[1].api, 'https://b.com/api.php/provide/vod/?a=1,2#x');
+    });
+
+    test('跳过 cms:// 等非 http 协议的条目', () {
+      const String text = '''
+      [
+        {"name": "低端影视", "api": "cms://ddys"},
+        {"name": "在线之家", "api": "cms://zxzj"},
+        {"name": "正常站", "api": "https://ok.com/api.php/provide/vod/"}
+      ]
+      ''';
+
+      final List<VodSource> sources = SourceImporter.parse(text);
+      expect(sources.length, 1);
+      expect(sources.single.name, '正常站');
+    });
+
+    test('彻底没有可用条目时给出可读错误', () {
+      expect(
+        () => SourceImporter.parse('[{"name": "没有接口"}]'),
+        throwsA(isA<Exception>()),
+      );
+    });
+  });
+
+  group('分类分层', () {
+    test('剔除被子分类引用的父分类', () {
+      // ffzyapi 实测的 class 顺序：1/2/3/4 是 type_pid=0 的父分类，
+      // 6/7/13 是它们的子分类。父分类查询返回空，必须排除。
+      final List<VodCategory> all = <VodCategory>[
+        const VodCategory(id: 1, name: '电影片', parentId: 0),
+        const VodCategory(id: 2, name: '连续剧', parentId: 0),
+        const VodCategory(id: 6, name: '动作片', parentId: 1),
+        const VodCategory(id: 7, name: '喜剧片', parentId: 1),
+        const VodCategory(id: 13, name: '国产剧', parentId: 2),
+      ];
+
+      expect(
+        VodCategory.leafOnly(all).map((VodCategory e) => e.id).toList(),
+        <int>[6, 7, 13],
+      );
+    });
+
+    test('扁平分类原样保留', () {
+      final List<VodCategory> flat = <VodCategory>[
+        const VodCategory(id: 1, name: 'a'),
+        const VodCategory(id: 2, name: 'b'),
+      ];
+      expect(VodCategory.leafOnly(flat), same(flat));
+    });
+
+    test('没有 type_pid 字段时原样保留', () {
+      final List<VodCategory> noPid = <VodCategory>[
+        const VodCategory(id: 1, name: 'a', parentId: 0),
+        const VodCategory(id: 2, name: 'b', parentId: 0),
+      ];
+      expect(VodCategory.leafOnly(noPid), same(noPid));
+    });
+
+    test('空列表原样返回', () {
+      expect(VodCategory.leafOnly(const <VodCategory>[]), isEmpty);
     });
   });
 }

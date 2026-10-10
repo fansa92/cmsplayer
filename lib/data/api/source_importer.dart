@@ -39,7 +39,7 @@ class SourceImporter {
 
     Object? data;
     try {
-      data = jsonDecode(raw);
+      data = _decodeLenient(raw);
     } on Object catch (e) {
       throw VodException('不是合法的 JSON', cause: e);
     }
@@ -91,6 +91,86 @@ class SourceImporter {
     if (text.isEmpty) return text;
     return text.startsWith('﻿') ? text.substring(1) : text;
   }
+
+  /// 按标准 JSON 解析，失败时清洗一遍再试。
+  ///
+  /// 官方源列表 `cms-player/vod-source/source.json` 自己就带尾逗号：
+  /// ```json
+  /// { "name": "黑木耳", "api": "https://…/", },
+  /// ```
+  /// 标准 `jsonDecode` 会抛 `Illegal trailing comma`，让"从 URL 导入"必挂。
+  /// 先严格试一次，能过就说明格式本来就干净；不行才清洗，
+  /// 这样真正的语法错误仍然会原样暴露给用户。
+  static Object? _decodeLenient(String text) {
+    try {
+      return jsonDecode(text);
+    } on FormatException {
+      return jsonDecode(_stripJsonNoise(text));
+    }
+  }
+
+  /// 去掉 JSON 里的尾逗号与注释；字符串字节内的一切原样保留。
+  static String _stripJsonNoise(String text) {
+    final StringBuffer out = StringBuffer();
+    bool inString = false;
+    bool escaped = false;
+
+    for (int i = 0; i < text.length; i++) {
+      final String ch = text[i];
+
+      if (inString) {
+        out.write(ch);
+        if (escaped) {
+          escaped = false;
+        } else if (ch == r'\') {
+          escaped = true;
+        } else if (ch == '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch == '"') {
+        inString = true;
+        out.write(ch);
+        continue;
+      }
+
+      // 块注释 /* ... */
+      if (ch == '/' && i + 1 < text.length && text[i + 1] == '*') {
+        final int end = text.indexOf('*/', i + 2);
+        i = end < 0 ? text.length - 1 : end + 1;
+        continue;
+      }
+
+      // 行注释 // ...
+      if (ch == '/' && i + 1 < text.length && text[i + 1] == '/') {
+        int j = i + 1;
+        while (j < text.length && text[j] != '\n' && text[j] != '\r') {
+          j++;
+        }
+        i = j;
+        continue;
+      }
+
+      // 尾逗号：逗号后第一个非空白字符是 } 或 ] 时丢弃该逗号。
+      if (ch == ',') {
+        int j = i + 1;
+        while (j < text.length && _isJsonSpace(text[j])) {
+          j++;
+        }
+        if (j < text.length && (text[j] == '}' || text[j] == ']')) {
+          continue;
+        }
+      }
+
+      out.write(ch);
+    }
+    return out.toString();
+  }
+
+  static bool _isJsonSpace(String ch) =>
+      ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
 
   /// 导出为官方兼容格式。
   static String export(List<VodSource> sources) {

@@ -42,6 +42,14 @@ class MacCmsApi {
     if (base == null || !base.hasScheme || base.host.isEmpty) {
       throw VodException('资源站接口地址无效', url: source.api);
     }
+    // http 包只认 http/https；放行 cms:// 之类会抛 Unsupported scheme，
+    // 到 UI 上就成了一个没有上下文的加载失败。
+    if (base.scheme != 'http' && base.scheme != 'https') {
+      throw VodException(
+        '资源站协议不支持（${base.scheme}://），仅支持 http / https 接口',
+        url: source.api,
+      );
+    }
     final Map<String, String> merged = <String, String>{
       ...base.queryParameters,
       ...params,

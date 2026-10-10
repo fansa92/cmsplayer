@@ -29,7 +29,7 @@ class CategoryPage extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        if (browse.categories.isNotEmpty) _CategoryBar(browse: browse),
+        if (browse.selectableCategories.isNotEmpty) _CategoryBar(browse: browse),
         _FilterBar(browse: browse),
         Expanded(child: _buildBody(context, browse, source, headers, history)),
       ],
@@ -86,7 +86,7 @@ class _CategoryBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<VodCategory> categories = browse.categories;
+    final List<VodCategory> categories = browse.selectableCategories;
     return SizedBox(
       height: 46,
       child: ListView(
