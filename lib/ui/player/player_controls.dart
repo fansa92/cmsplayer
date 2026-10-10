@@ -1,11 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/constants.dart';
 import '../../core/utils/formatter.dart';
+import '../../core/utils/responsive.dart';
 import '../../data/models/play_line.dart';
 import 'player_controller.dart';
+import 'player_window.dart';
 
 /// 播放器控制层。
 ///
@@ -29,6 +32,16 @@ class _PlayerControlsState extends State<PlayerControls> {
   Timer? _hideTimer;
   bool _visible = true;
 
+  /// 键盘焦点。播放页内没有输入框，独占它不会打断任何输入。
+  final FocusNode _focusNode = FocusNode(debugLabel: 'PlayerControls');
+
+  /// 窗口是否全屏，只用于全屏按钮的图标与 Esc 判断（仅桌面有意义）。
+  bool _fullScreen = false;
+
+  /// 键盘操作的临时提示（音量、快进步长）。
+  String? _osd;
+  Timer? _osdTimer;
+
   PlayerController get controller => widget.controller;
 
   @override
@@ -36,11 +49,24 @@ class _PlayerControlsState extends State<PlayerControls> {
     super.initState();
     _visible = true;
     _scheduleHide();
+
+    if (PlatformInfo.isDesktop) {
+      PlayerWindow.isFullScreen().then((bool v) {
+        if (mounted) setState(() => _fullScreen = v);
+      });
+    }
+
+    // autofocus 在路由还没拿到焦点时可能落空，这里补一帧再请求一次。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
   }
 
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _osdTimer?.cancel();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -60,8 +86,31 @@ class _PlayerControlsState extends State<PlayerControls> {
 
   void _show() {
     if (!mounted) return;
-    setState(() => _visible = true);
+    // 键盘控制的前提是焦点在这层。顶栏按钮、选集面板都可能把焦点抢走，
+    // 所以每次交互都顺手抢回来（焦点已在本节点时是空操作）。
+    _focusNode.requestFocus();
+    // 鼠标移动会以很高的频率调到这里，已经可见时只重置定时器即可，
+    // 无谓的 setState 会让整个控制层跟着指针抖动重建。
+    if (!_visible) setState(() => _visible = true);
     _scheduleHide();
+  }
+
+  /// 键盘 / 手势操作后的浮层提示。
+  void _showOsd(String text) {
+    if (!mounted) return;
+    _osdTimer?.cancel();
+    setState(() => _osd = text);
+    _osdTimer = Timer(const Duration(milliseconds: 1400), () {
+      if (!mounted) return;
+      setState(() => _osd = null);
+    });
+  }
+
+  Future<void> _stepVolume(double delta) async {
+    await controller.stepVolume(delta);
+    if (!mounted) return;
+    _showOsd('音量 ${controller.volume.round()}%');
+    _show();
   }
 
   void _toggle() {
@@ -117,30 +166,127 @@ class _PlayerControlsState extends State<PlayerControls> {
     _scheduleHide();
   }
 
+  // ---------------------------------------------------------------- 键盘
+
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    // 只处理按下与长按重复；松开不处理，但也不放行，避免穿透到别处。
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    final bool repeat = event is KeyRepeatEvent;
+    final LogicalKeyboardKey key = event.logicalKey;
+
+    switch (key) {
+      case LogicalKeyboardKey.escape:
+        // 有焦点就说明播放页在最上层，重复触发无副作用。
+        _handleEscape();
+        return KeyEventResult.handled;
+
+      // 播放控制类按键不吃长按重复，否则按住空格会疯狂切换暂停。
+      case LogicalKeyboardKey.space:
+      case LogicalKeyboardKey.keyK:
+        if (!repeat) {
+          controller.togglePlay();
+          _show();
+        }
+        return KeyEventResult.handled;
+
+      case LogicalKeyboardKey.keyF:
+        if (!repeat) _toggleFullScreen();
+        return KeyEventResult.handled;
+
+      // 下面这些按键长按应当连续生效（按住方向键持续快进 / 调音量）。
+      case LogicalKeyboardKey.arrowLeft:
+      case LogicalKeyboardKey.keyJ:
+        controller.seekBy(const Duration(seconds: -10));
+        _showOsd('快退 10 秒');
+        _show();
+        return KeyEventResult.handled;
+
+      case LogicalKeyboardKey.arrowRight:
+      case LogicalKeyboardKey.keyL:
+        controller.seekBy(const Duration(seconds: 10));
+        _showOsd('快进 10 秒');
+        _show();
+        return KeyEventResult.handled;
+
+      case LogicalKeyboardKey.arrowUp:
+        _stepVolume(5);
+        return KeyEventResult.handled;
+
+      case LogicalKeyboardKey.arrowDown:
+        _stepVolume(-5);
+        return KeyEventResult.handled;
+
+      default:
+        return KeyEventResult.ignored;
+    }
+  }
+
+  Future<void> _handleEscape() async {
+    if (await PlayerWindow.isFullScreen()) {
+      await PlayerWindow.setFullScreen(false);
+      if (!mounted) return;
+      setState(() => _fullScreen = false);
+      _show();
+      return;
+    }
+    widget.onBack();
+  }
+
+  Future<void> _toggleFullScreen() async {
+    final bool next = await PlayerWindow.toggleFullScreen();
+    if (!mounted) return;
+    setState(() => _fullScreen = next);
+    _show();
+  }
+
   // ---------------------------------------------------------------- 构建
 
   @override
   Widget build(BuildContext context) {
+    return Focus(
+      focusNode: _focusNode,
+      autofocus: true,
+      onKeyEvent: _onKeyEvent,
+      // translucent：不吞掉子节点的命中，自己也照样收到悬停事件。
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        // 锁定时不重置自动隐藏计时也无妨（锁定分支根本不渲染面板），
+        // 故意不在这里读 controller.locked —— 那是 ListenableBuilder 的事，
+        // 放在外层会拿到陈旧值。
+        onPointerHover: PlatformInfo.isDesktop
+            ? (PointerHoverEvent _) => _show()
+            : null,
+        child: _buildStack(context),
+      ),
+    );
+  }
+
+  Widget _buildStack(BuildContext context) {
     return ListenableBuilder(
       listenable: controller,
       builder: (BuildContext context, _) {
+        // 必须在 builder 内部取值：锁定状态变化时只有这里会重建。
+        final bool locked = controller.locked;
         return Stack(
           fit: StackFit.expand,
           children: <Widget>[
-            // 底层手势区：始终铺满。
+            // 底层手势区：始终铺满。锁定时全部回调置 null。
             GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: _toggle,
-              onDoubleTap: () {
+              onTap: locked ? null : () {
+                _focusNode.requestFocus();
+                _toggle();
+              },
+              onDoubleTap: locked ? null : () {
                 controller.togglePlay();
                 _show();
               },
-              onHorizontalDragStart: _onHorizontalDragStart,
-              onHorizontalDragUpdate: _onHorizontalDragUpdate,
-              onHorizontalDragEnd: _onHorizontalDragEnd,
-              onVerticalDragStart: _onVerticalDragStart,
-              onVerticalDragUpdate: _onVerticalDragUpdate,
-              onVerticalDragEnd: _onVerticalDragEnd,
+              onHorizontalDragStart: locked ? null : _onHorizontalDragStart,
+              onHorizontalDragUpdate: locked ? null : _onHorizontalDragUpdate,
+              onHorizontalDragEnd: locked ? null : _onHorizontalDragEnd,
+              onVerticalDragStart: locked ? null : _onVerticalDragStart,
+              onVerticalDragUpdate: locked ? null : _onVerticalDragUpdate,
+              onVerticalDragEnd: locked ? null : _onVerticalDragEnd,
               child: const SizedBox.expand(),
             ),
 
@@ -236,6 +382,15 @@ class _PlayerControlsState extends State<PlayerControls> {
                 ],
               ),
             ),
+            if (PlatformInfo.isDesktop)
+              IconButton(
+                tooltip: _fullScreen ? '退出全屏 (Esc)' : '全屏 (F)',
+                color: Colors.white,
+                icon: Icon(
+                  _fullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                ),
+                onPressed: _toggleFullScreen,
+              ),
             IconButton(
               tooltip: '选集',
               color: Colors.white,
@@ -246,12 +401,12 @@ class _PlayerControlsState extends State<PlayerControls> {
               },
             ),
             IconButton(
-              tooltip: '锁定',
+              tooltip: controller.locked ? '已锁定，点击解锁' : '锁定屏幕',
               color: Colors.white,
-              icon: const Icon(Icons.lock_open),
+              icon: Icon(controller.locked ? Icons.lock : Icons.lock_open),
               onPressed: () {
                 controller.toggleLock();
-                _scheduleHide();
+                _show();
               },
             ),
           ],
@@ -465,6 +620,22 @@ class _PlayerControlsState extends State<PlayerControls> {
                 style: const TextStyle(color: Colors.white, fontSize: 12),
               ),
             ],
+          ),
+        ),
+      );
+    }
+
+    // 键盘操作的浮层提示（音量 / 快进步长）。
+    if (_osd != null) {
+      return Center(
+        child: _GlassBox(
+          child: Text(
+            _osd!,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
       );

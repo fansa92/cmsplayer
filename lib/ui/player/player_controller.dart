@@ -312,6 +312,21 @@ class PlayerController extends ChangeNotifier {
     await _player.setRate(value);
   }
 
+  /// 音量步进，供键盘 / 滚轮使用。[deltaPercent] 为百分点，例如 `5` / `-5`。
+  ///
+  /// 与手势用的 [startVerticalGesture] 分开：手势是"绝对比例"（跟手），
+  /// 键盘是"相对步进"，两者共用会互相覆盖。
+  Future<void> stepVolume(double deltaPercent) async {
+    final double v = (_volume + deltaPercent).clamp(0.0, 100.0);
+    _volume = v;
+    _emit();
+    try {
+      await _player.setVolume(v);
+    } on Object {
+      // 平台不支持时静默忽略。
+    }
+  }
+
   Future<void> cycleFit() async {
     switch (_fit) {
       case BoxFit.contain:
