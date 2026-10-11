@@ -329,11 +329,12 @@ class _PlayerControlsState extends State<PlayerControls> {
               ),
 
             if (_visible) ...<Widget>[
-              // 锁已经挪到播放键左侧（见 _buildCenter），顶栏只负责
-              // 「返回 + 标题 + 电量 + 各平台的功能键」。
               _buildTopBar(context, locked: locked),
-              _buildCenter(context, locked: locked),
-              if (!locked) _buildBottomBar(context),
+              if (!locked) ...<Widget>[
+                _buildCenter(context),
+                _buildBottomBar(context),
+              ],
+              _buildLockButton(context, locked: locked),
             ],
             _buildGestureIndicator(context),
           ],
@@ -421,6 +422,16 @@ class _PlayerControlsState extends State<PlayerControls> {
               ),
             if (!locked)
               IconButton(
+                tooltip: '视频信息',
+                color: Colors.white,
+                icon: const Icon(Icons.info_outline),
+                onPressed: () {
+                  _showInfoSheet(context);
+                  _scheduleHide();
+                },
+              ),
+            if (!locked)
+              IconButton(
                 tooltip: '选集',
                 color: Colors.white,
                 icon: const Icon(Icons.playlist_play),
@@ -435,65 +446,59 @@ class _PlayerControlsState extends State<PlayerControls> {
     );
   }
 
-  /// 画面中央：锁 + 播放键。
-  ///
-  /// 锁固定在播放键的左侧，是这一行里最靠左的一个。它跟其余控件一样挂在
-  /// [_visible] 下面自动隐藏，单击画面即可重新唤出。
-  ///
-  /// 锁原先挤在顶栏最右端，手机上顶栏还要留给标题、电量、横屏和选集，
-  /// 挤在角落里既难找又容易在返回时误触；挪到播放键旁边后位置固定、
-  /// 也好按。
-  Widget _buildCenter(BuildContext context, {required bool locked}) {
+  Widget _buildCenter(BuildContext context) {
     final bool showSpinner = controller.buffering || controller.starting;
 
     return Center(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          IconButton(
-            tooltip: locked ? '已锁定播放控件，点击解锁' : '锁定播放控件',
-            iconSize: 40,
-            color: Colors.white,
-            style: IconButton.styleFrom(
-              backgroundColor: Colors.black38,
-              padding: const EdgeInsets.all(12),
+      child: showSpinner
+          ? const SizedBox(
+              width: 44,
+              height: 44,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                color: Colors.white,
+              ),
+            )
+          : IconButton(
+              iconSize: 56,
+              color: Colors.white,
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.black38,
+                padding: const EdgeInsets.all(20),
+              ),
+              onPressed: () {
+                controller.togglePlay();
+                _show();
+              },
+              icon: Icon(
+                controller.playing ? Icons.pause : Icons.play_arrow,
+              ),
             ),
-            onPressed: () {
-              controller.toggleLock();
-              _show();
-            },
-            icon: Icon(locked ? Icons.lock : Icons.lock_open),
-          ),
-          // 锁定时播放键与缓冲圈干脆不渲染，而不是灰着摆在那儿 ——
-          // 灰按钮只会让人以为界面卡住了。
-          if (!locked) ...<Widget>[
-            const SizedBox(width: 16),
-            showSpinner
-                ? const SizedBox(
-                    width: 44,
-                    height: 44,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 3,
-                      color: Colors.white,
-                    ),
-                  )
-                : IconButton(
-                    iconSize: 56,
-                    color: Colors.white,
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.black38,
-                      padding: const EdgeInsets.all(20),
-                    ),
-                    onPressed: () {
-                      controller.togglePlay();
-                      _show();
-                    },
-                    icon: Icon(
-                      controller.playing ? Icons.pause : Icons.play_arrow,
-                    ),
-                  ),
-          ],
-        ],
+    );
+  }
+
+  /// 锁定按钮：屏幕最左侧、垂直居中。
+  ///
+  /// 放最左是因为中央已经有播放键，而顶栏在手机上要留给标题、电量、横屏
+  /// 和选集；最左侧这条竖带平时空着，既好找也不会遮到画面主体。
+  ///
+  /// 它和其余控件一样挂在 [_visible] 下自动隐藏，单击画面即可重新唤出。
+  Widget _buildLockButton(BuildContext context, {required bool locked}) {
+    return Positioned(
+      left: 4,
+      top: 0,
+      bottom: 0,
+      child: Center(
+        child: IconButton(
+          tooltip: locked ? '已锁定播放控件，点击解锁' : '锁定播放控件',
+          color: Colors.white,
+          style: IconButton.styleFrom(backgroundColor: Colors.black26),
+          icon: Icon(locked ? Icons.lock : Icons.lock_open),
+          onPressed: () {
+            controller.toggleLock();
+            _show();
+          },
+        ),
       ),
     );
   }
@@ -583,6 +588,11 @@ class _PlayerControlsState extends State<PlayerControls> {
                     _scheduleHide();
                   },
                 ),
+                // 清晰度：纯信息，不做成按钮，点它不如点顶栏的"视频信息"。
+                if (controller.resolutionLabel != null) ...<Widget>[
+                  const SizedBox(width: 8),
+                  _InfoChip(label: controller.resolutionLabel!),
+                ],
                 const Spacer(),
                 if (controller.task.hasPrev)
                   IconButton(
@@ -791,6 +801,117 @@ class _PlayerControlsState extends State<PlayerControls> {
       ),
     );
   }
+
+  /// mpv 给的 codec 是 FourCC 之类的原始串（avc1 / hvc1 / mp4a），翻译成
+  /// 人看得懂的名字；认不出就原样显示，不瞎猜。
+  static const Map<String, String> _codecNames = <String, String>{
+    'avc1': 'H.264 / AVC',
+    'avc3': 'H.264 / AVC',
+    'h264': 'H.264 / AVC',
+    'hev1': 'H.265 / HEVC',
+    'hvc1': 'H.265 / HEVC',
+    'hevc': 'H.265 / HEVC',
+    'vp09': 'VP9',
+    'vp8': 'VP8',
+    'av01': 'AV1',
+    'mp4a': 'AAC',
+    'aac': 'AAC',
+    'ac-3': 'AC-3',
+    'ec-3': 'E-AC-3',
+    'opus': 'Opus',
+    'vorbis': 'Vorbis',
+    'flac': 'FLAC',
+    'mp3': 'MP3',
+  };
+
+  String _describeCodec(String? raw) {
+    if (raw == null || raw.isEmpty) return '';
+    final String? name = _codecNames[raw.toLowerCase()];
+    return name == null ? raw : '$name（$raw）';
+  }
+
+  /// 视频信息面板：分辨率、帧率、编码、解码器、像素格式、音频参数。
+  ///
+  /// mpv 要等文件真正打开并探测完才给得出这些值，纯音频或探测失败时大部分
+  /// 是 null —— 对应那几行干脆不显示，而不是摆一个"未知"占位。
+  Future<void> _showInfoSheet(BuildContext context) async {
+    final String? resolution = controller.resolutionLabel;
+    final String? fps = controller.fpsLabel;
+
+    final List<List<String>> rows = <List<String>>[
+      if (resolution != null) <String>['分辨率', resolution],
+      if (fps != null) <String>['帧率', '$fps fps'],
+      if (controller.videoCodec != null)
+        <String>['视频编码', _describeCodec(controller.videoCodec)],
+      if (controller.videoDecoder != null)
+        <String>['解码器', controller.videoDecoder!],
+      if (controller.pixelFormat != null)
+        <String>['像素格式', controller.pixelFormat!],
+      if (controller.audioCodec != null)
+        <String>['音频编码', _describeCodec(controller.audioCodec)],
+      if (controller.audioChannels != null)
+        <String>['声道', controller.audioChannels!],
+      if (controller.audioSampleRate != null)
+        <String>[
+          '采样率',
+          '${(controller.audioSampleRate! / 1000).toStringAsFixed(1)} kHz',
+        ],
+    ];
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (BuildContext ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                '视频信息',
+                style: Theme.of(ctx)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 12),
+              if (rows.isEmpty)
+                Text('暂无可用的流信息', style: Theme.of(ctx).textTheme.bodyMedium)
+              else
+                for (final List<String> row in rows)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        SizedBox(
+                          width: 76,
+                          child: Text(
+                            row[0],
+                            style: Theme.of(ctx)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(ctx).colorScheme.outline,
+                                ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            row[1],
+                            style: Theme.of(ctx).textTheme.bodyMedium,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ---------------------------------------------------------------- 子组件
@@ -819,6 +940,35 @@ class _PillButton extends StatelessWidget {
             fontSize: 12,
             fontWeight: FontWeight.w600,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 只读信息标签（清晰度）。
+///
+/// 长得像 [_PillButton] 但不可点，所以不做成 InkWell —— 一个点不动的按钮
+/// 比一段普通文字更让人困惑。
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.white12,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white70,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
         ),
       ),
     );

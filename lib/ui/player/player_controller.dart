@@ -92,6 +92,19 @@ class PlayerController extends ChangeNotifier {
   /// 否则会出现"手势显示 70%、键盘显示 100%"两套互相矛盾的数字。
   double _systemVolume = -1;
 
+  // 视频 / 音频的流信息，供"视频信息"面板展示。全部允许为 null：
+  // mpv 要等文件真正打开并探测完才给得出，纯音频或者探测失败时这些字段
+  // 一直是 null，面板里对应那几行直接不显示。
+  int? _videoWidth;
+  int? _videoHeight;
+  double? _videoFps;
+  String? _videoCodec;
+  String? _videoDecoder;
+  String? _pixelFormat;
+  String? _audioCodec;
+  String? _audioChannels;
+  int? _audioSampleRate;
+
   bool _disposed = false;
   DateTime _lastHistoryWrite = DateTime.fromMillisecondsSinceEpoch(0);
   bool _resumeApplied = false;
@@ -134,6 +147,37 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  // ---------------------------------------------------------------- 流信息
+
+  int? get videoWidth => _videoWidth;
+  int? get videoHeight => _videoHeight;
+  double? get videoFps => _videoFps;
+  String? get videoCodec => _videoCodec;
+  String? get videoDecoder => _videoDecoder;
+  String? get pixelFormat => _pixelFormat;
+  String? get audioCodec => _audioCodec;
+  String? get audioChannels => _audioChannels;
+  int? get audioSampleRate => _audioSampleRate;
+
+  /// 清晰度，例如 `1920x1080`。
+  ///
+  /// 优先用 stream 的 width / height：那是解码后的实际尺寸；track 上那对
+  /// demux-w / demux-h 是容器里标的标称值，遇到旋转 90 度的竖屏视频会和
+  /// 实际显示的宽高对不上。
+  String? get resolutionLabel {
+    final int? w = _videoWidth;
+    final int? h = _videoHeight;
+    if (w == null || h == null || w <= 0 || h <= 0) return null;
+    return '${w}x$h';
+  }
+
+  /// 帧率，去掉无意义的小数尾巴（23.976 保留，30.000 变成 30）。
+  String? get fpsLabel {
+    final double? fps = _videoFps;
+    if (fps == null || fps <= 0) return null;
+    return fps.toStringAsFixed(3).replaceFirst(RegExp(r'\.?0+$'), '');
+  }
+
   void _emit() {
     if (_disposed) return;
     notifyListeners();
@@ -154,6 +198,22 @@ class PlayerController extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------- 绑定
+
+  /// 清空上一集遗留的流信息。
+  ///
+  /// 不清的话，切换到一条没有视频轨的源时，面板会继续显示上一条片子的
+  /// 分辨率和编码 —— 比干脆不显示更误导。
+  void _resetStreamInfo() {
+    _videoWidth = null;
+    _videoHeight = null;
+    _videoFps = null;
+    _videoCodec = null;
+    _videoDecoder = null;
+    _pixelFormat = null;
+    _audioCodec = null;
+    _audioChannels = null;
+    _audioSampleRate = null;
+  }
 
   void _bindStreams() {
     _subs.add(_player.stream.position.listen((Duration p) {
@@ -195,6 +255,31 @@ class PlayerController extends ChangeNotifier {
       if (_disposed) return;
       _error = e.isEmpty ? '播放失败' : e;
       _starting = false;
+      _emit();
+    }));
+
+    // 视频信息。这几个流只在文件打开、探测完成后各触发一次，
+    // 切集时也会重新来一遍，所以不会造成控制栏跟着播放持续重建。
+    _subs.add(_player.stream.width.listen((int? w) {
+      _videoWidth = w;
+      _emit();
+    }));
+    _subs.add(_player.stream.height.listen((int? h) {
+      _videoHeight = h;
+      _emit();
+    }));
+    _subs.add(_player.stream.track.listen((Track t) {
+      // track 一次带回全部音视频属性，比分开订阅 width/codec/fps 更省。
+      _videoFps = t.video.fps;
+      _videoCodec = t.video.codec;
+      _videoDecoder = t.video.decoder;
+      _audioCodec = t.audio.codec;
+      _audioChannels = t.audio.channels;
+      _audioSampleRate = t.audio.samplerate;
+      _emit();
+    }));
+    _subs.add(_player.stream.videoParams.listen((VideoParams p) {
+      _pixelFormat = p.pixelformat;
       _emit();
     }));
   }
@@ -242,6 +327,7 @@ class PlayerController extends ChangeNotifier {
     _resumeApplied = false;
     _position = Duration.zero;
     _duration = Duration.zero;
+    _resetStreamInfo();
     _emit();
 
     AppLog.d('Player', 'open $url');
