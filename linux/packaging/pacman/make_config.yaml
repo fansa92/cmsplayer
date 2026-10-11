@@ -1,0 +1,53 @@
+# fastforge 的 pacman maker 配置
+# 路径固定为 linux/packaging/pacman/make_config.yaml，由 pacman maker 写死。
+#
+# 产物是标准的 .pkg.tar.xz，可直接 `pacman -U cmsplayer-*.pkg.tar.xz` 安装。
+# maker 会用 bsdtar + xz 组包（所以 CI 里要装 libarchive-tools 和 xz-utils）。
+#
+# 产物布局：
+#   /opt/cms_player/            应用 + 全部自带动态库
+#   /usr/bin/cms_player         post_install 建的软链（post_remove 会删）
+#   /usr/share/applications/cms_player.desktop
+#   /usr/share/icons/hicolor/{128,256}x256/apps/cms_player.png
+display_name: CMSPlayer
+
+# Arch 的包名规则是全小写、只用 - 和 +。不写会回退到 pubspec 的 name
+# （cms_player，带下划线，pacman 不接受）。
+package_name: cmsplayer
+
+maintainer:
+  name: CMSPlayer
+  email: cmsplayer@users.noreply.github.com
+
+# 不写 licenses 会落到默认值 'unknown'，会让一些用户在 makepkg 时收到警告。
+licenses:
+  - MIT
+
+# 不写 groups 会落到默认值 'default'，装完会被归进名为 default 的用户组里，
+# 这个默认值其实没什么意义，显式指定为空不合适，故保持默认。
+# 如果不希望被归组，pacman 本身没有"无组"的表达方式，只能接受。
+
+# 安装后占用大小，单位 KB。会写进 PKGINFO 的 size 字段，pacman -Qi 可见，
+# 同时也用于 `pacman -Sc` 的磁盘空间统计。
+installed_size: 130000
+
+# 动态库已由 .github/scripts/bundle-linux.sh 收进 /opt/cms_player/lib/，
+# 所以不填 dependencies：目标机不需要装 libgtk-3 / libmpv 等额外的库。
+
+icon: assets/icons/app_icon.png
+
+generic_name: 视频播放器
+keywords:
+  - CMS
+  - macCMS
+  - VOD
+  - Player
+  - 播放器
+
+# 类别以分号结尾才符合 freedesktop 规范；pacman maker 会自动补上结尾的分号。
+categories:
+  - AudioVideo
+  - Video
+
+# constructor 的默认值是 false，不显式打开的话 .desktop 里会写 StartupNotify=false。
+startup_notify: true

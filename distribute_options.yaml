@@ -1,0 +1,9 @@
+# fastforge（原 flutter_distributor，该包已停止维护并改名为 fastforge）
+# 的项目级配置。
+#
+# CI 用的是 `fastforge package --platform=linux --targets=...` 这种显式指定
+# 目标的方式，不走本文件里的 releases，所以这里只需要 output 一个字段。
+#
+# 注意末尾的斜杠是必需的：打包器把版本号直接字符串拼在本路径后面，
+# 写成 dist 会得到 dist1.0.0+1 这样的目录。
+output: dist/

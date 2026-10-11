@@ -291,11 +291,14 @@ jobs:
           compression-level: 0
 
   # ====================================================================
-  # Linux：把 GTK / Cairo / Pango 等系统库收进 lib/ 并改写 RPATH，
-  # 做成解压即用的免依赖包（仅 glibc 必须来自系统）
+  # Linux：一次构建产出 5 种发行格式，全部经 bundle-linux.sh 收库成免依赖版
+  #   1) 解压即用的便携 tar.gz（仅 glibc 必须来自系统）
+  #   2) deb / rpm / pacman / AppImage —— 交给 fastforge 打包
+  # fastforge 是已停止维护的 flutter_distributor 的官方继任者（同作者改名），
+  # 它自己会 clean + build，4 个 target 复用同一次构建（isBuildOnlyOnce）。
   # ====================================================================
   linux:
-    name: Linux 免依赖版 (.tar.gz)
+    name: Linux (tar.gz + deb/rpm/pacman/AppImage)
     needs: [quality, meta]
     # 显式钉住 24.04：ubuntu-latest 自 2026-10 起切到 26.04，
     # glibc 版本会跟着变，免依赖包的最低 glibc 要求也就跟着变。
@@ -324,32 +327,93 @@ jobs:
           #   所以只能靠系统的 -dev 包提供头文件与 .pc。
           sudo apt-get install -y --no-install-recommends \
             clang cmake ninja-build pkg-config libgtk-3-dev \
-            libasound2-dev libmpv-dev libepoxy-dev patchelf file
+            libasound2-dev libmpv-dev libepoxy-dev patchelf file \
+            rpm libarchive-tools xz-utils
+
+      - name: 安装 fastforge
+        run: |
+          set -euo pipefail
+          dart pub global activate fastforge
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: 安装 appimagetool
+        shell: bash
+        run: |
+          set -euo pipefail
+          # appimagetool 本身是个 AppImage，直接跑要靠 FUSE 挂载，而 CI 环境
+          # 不一定有 FUSE（Ubuntu 24.04 起也没有 libfuse2 了）。
+          # 改用它自带的 --appimage-extract 解包，再用一个壳脚本转调里面的 AppRun，
+          # 这条路完全不碰 FUSE。fastforge 是按 PATH 找 "appimagetool" 的。
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          (cd "$RUNNER_TEMP" && ./appimagetool --appimage-extract > /dev/null)
+          sudo mv "$RUNNER_TEMP/squashfs-root" /opt/appimagetool
+          printf '#!/bin/sh\nexec /opt/appimagetool/AppRun "$@"\n' \
+            | sudo tee /usr/local/bin/appimagetool > /dev/null
+          sudo chmod +x /usr/local/bin/appimagetool
 
       - name: 获取依赖
         run: flutter pub get
 
-      - name: 构建 Linux 发行版
-        run: flutter build linux --release
+      - name: 打包 deb / rpm / pacman / AppImage
+        shell: bash
+        run: |
+          set -euo pipefail
+          # --hook-pre 在「构建完成之后、打包之前」执行，hook 内能拿到环境变量
+          # BUILD_OUTPUT_DIRECTORY，即 flutter build linux 产出的 bundle 路径。
+          # 借此把我们收库 + 改 RPATH 的脚本挂进去，4 种格式就都是免依赖的。
+          # hook 每个 target 各跑一次，脚本内部有幂等哨兵，只会真正执行一遍。
+          # --skip-clean：工作区本来就是干净的，省掉一次 flutter clean。
+          fastforge package \
+            --platform=linux \
+            --targets=deb,rpm,pacman,appimage \
+            --skip-clean \
+            --hook-pre 'bash .github/scripts/bundle-linux.sh "$BUILD_OUTPUT_DIRECTORY"'
 
-      - name: 打包免依赖发行版
+          ls -lhR dist
+
+      - name: 打包免依赖便携版并统一命名
         shell: bash
         run: |
           set -euo pipefail
           v="${{ needs.meta.outputs.version }}"
-          bash .github/scripts/bundle-linux.sh build/linux/x64/release/bundle
+          bundle="build/linux/x64/release/bundle"
+
+          # 上一步的 hook 已经把动态库收进 bundle/lib/ 并改好了 RPATH，
+          # 这里再调一次会命中幂等哨兵直接返回，不会重复处理。
+          bash .github/scripts/bundle-linux.sh "$bundle"
 
           mkdir -p dist
-          mv build/linux/x64/release/bundle "dist/CMSPlayer-linux-x64"
+          mv "$bundle" dist/CMSPlayer-linux-x64
           tar -C dist -czf "dist/CMSPlayer-$v-linux-x64-portable.tar.gz" CMSPlayer-linux-x64
-          rm -rf "dist/CMSPlayer-linux-x64"
+          rm -rf dist/CMSPlayer-linux-x64
+
+          # fastforge 的产物落在 dist/<pubspec版本>/ 下，文件名是它自己的默认规则，
+          # 这里改成本发行版统一的命名。后缀取自 packageFormat，
+          # 注意 appimage 那个后缀是大写的 AppImage。
+          for f in dist/*/cms_player-*-linux.*; do
+            [ -e "$f" ] || continue
+            case "$f" in
+              *.deb)                out="CMSPlayer-$v-linux-x64.deb" ;;
+              *.rpm)                out="CMSPlayer-$v-linux-x64.rpm" ;;
+              *.pacman)             out="CMSPlayer-$v-linux-x64.pacman.pkg.tar.xz" ;;
+              *.AppImage|*.appimage) out="CMSPlayer-$v-linux-x64.AppImage" ;;
+              *) continue ;;
+            esac
+            mv "$f" "dist/$out"
+          done
+
+          # 清掉 fastforge 留下的空版本目录，免得被一起打包成 artifact
+          find dist -mindepth 1 -maxdepth 1 -type d -empty -delete
+          chmod +x dist/*.AppImage 2>/dev/null || true
           ls -lh dist
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: linux
-          path: dist/*.tar.gz
+          path: dist/*
           if-no-files-found: error
           compression-level: 0
 

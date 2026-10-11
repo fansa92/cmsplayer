@@ -1,0 +1,46 @@
+# fastforge 的 deb maker 配置
+# 路径固定为 linux/packaging/deb/make_config.yaml，由 deb maker 写死。
+#
+# 产物布局：
+#   /opt/cms_player/            应用 + 全部自带动态库
+#   /usr/bin/cms_player         postinst 建的软链（postrm 会删）
+#   /usr/share/applications/cms_player.desktop
+#   /usr/share/icons/hicolor/{128,256}x256/apps/cms_player.png
+display_name: CMSPlayer
+package_name: cmsplayer
+
+maintainer:
+  name: CMSPlayer
+  email: cmsplayer@users.noreply.github.com
+
+# priority 见 Debian Policy：required/important/standard/optional/extra
+priority: optional
+# section 见 Debian Policy 的 subsection 列表，视频播放器归 video
+section: video
+
+# 安装后占用的大小，单位 KB。只影响 apt 的磁盘空间估算，不参与构建，
+# 因此给一个偏保守的估值即可。
+installed_size: 130000
+
+# 动态库（GTK / Cairo / Pango / libmpv / libepoxy 等）已经由
+# .github/scripts/bundle-linux.sh 收进 /opt/cms_player/lib/ 并改好 RPATH，
+# 所以这里刻意不声明 Depends：目标机不需要装任何额外的库，
+# 只要求系统的 glibc 版本不低于构建机（ubuntu-24.04）。
+
+icon: assets/icons/app_icon.png
+
+generic_name: 视频播放器
+keywords:
+  - CMS
+  - macCMS
+  - VOD
+  - Player
+  - 播放器
+
+# 类别要以分号结尾才符合 freedesktop 规范；deb maker 会自动补上结尾的分号，
+# 这里只写裸的类别名。
+categories:
+  - AudioVideo
+  - Video
+
+startup_notify: true

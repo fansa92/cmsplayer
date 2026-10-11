@@ -1,0 +1,45 @@
+# fastforge 的 rpm maker 配置
+# 路径固定为 linux/packaging/rpm/make_config.yaml，由 rpm maker 写死。
+#
+# 产物布局（rpmbuild 的 %install 段生成）：
+#   /usr/share/cms_player/      应用 + 全部自带动态库
+#   /usr/bin/cms_player         指向 /usr/share/cms_player/cms_player 的软链
+#   /usr/share/applications/cms_player.desktop
+#   /usr/share/pixmaps/cms_player.png
+display_name: CMSPlayer
+
+# 不写则回退到 pubspec 的 name（cms_player，带下划线）。
+# rpm 的 Name 字段不允许下划线，必须显式指定。
+package_name: cmsplayer
+
+# RPM 的 Summary 要求简短且单行，直接沿用 pubspec 里那句长描述会很难看。
+summary: macCMS / 苹果CMS 资源站播放器
+description: >-
+  CMSPlayer 是跨平台 VOD 播放器，支持 macCMS / 苹果CMS 资源站协议，
+  可运行于 Windows / macOS / Linux / Android / iOS。
+
+vendor: CMSPlayer
+packager: CMSPlayer
+packager_email: cmsplayer@users.noreply.github.com
+license: MIT
+
+# 注意：rpm 的 %install 会无条件执行 cp cms_player.png，所以 icon 是必填项，
+# 缺了会让 rpmbuild 直接失败（与 deb / pacman 不同，后两者 icon 可选）。
+icon: assets/icons/app_icon.png
+
+# 动态库已由 .github/scripts/bundle-linux.sh 收进应用目录，
+# 因此不声明 Requires：目标机不需要装 libgtk-3 / libmpv 等额外的库。
+# 注意也不要填 BuildRequires：这个 spec 只做 %install，不重新编译源码。
+
+generic_name: 视频播放器
+keywords:
+  - CMS
+  - macCMS
+  - VOD
+  - Player
+  - 播放器
+categories:
+  - AudioVideo
+  - Video
+
+startup_notify: true

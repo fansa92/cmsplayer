@@ -28,6 +28,15 @@ if [[ -z "$BIN" ]]; then
 fi
 
 LIB_DIR="$BUNDLE_DIR/lib"
+
+# fastforge 会为每个 target（deb / rpm / pacman / appimage）各跑一次 pre hook，
+# 而它本身只 build 一次。用 libgtk-3 是否已经收进 lib/ 当作"处理过"的哨兵：
+# 后面几次调用直接跳过，省掉重复的 ldd 递归与 patchelf。
+if compgen -G "$LIB_DIR/libgtk-3.so*" > /dev/null; then
+  echo "==> 动态库已收集过，跳过: $LIB_DIR"
+  exit 0
+fi
+
 mkdir -p "$LIB_DIR"
 
 # glibc 与动态加载器必须用目标系统的，打包进去会导致段错误。
