@@ -293,9 +293,11 @@ jobs:
   # ====================================================================
   # Linux：一次构建产出 5 种发行格式，全部经 bundle-linux.sh 收库成免依赖版
   #   1) 解压即用的便携 tar.gz（仅 glibc 必须来自系统）
-  #   2) deb / rpm / pacman / AppImage —— 交给 fastforge 打包
+  #   2) deb / rpm / pacman —— 交给 fastforge 打包
+  #   3) AppImage —— fastforge 的 appimage maker 有缺陷（详见下面那步的注释），
+  #      改为直接用 appimagetool 打包同一个已经收好库的 bundle
   # fastforge 是已停止维护的 flutter_distributor 的官方继任者（同作者改名），
-  # 它自己会 clean + build，4 个 target 复用同一次构建（isBuildOnlyOnce）。
+  # 它自己会 clean + build，多个 target 复用同一次构建（isBuildOnlyOnce）。
   # ====================================================================
   linux:
     name: Linux (tar.gz + deb/rpm/pacman/AppImage)
@@ -356,7 +358,7 @@ jobs:
       - name: 获取依赖
         run: flutter pub get
 
-      - name: 打包 deb / rpm / pacman / AppImage
+      - name: 打包 deb / rpm / pacman
         shell: bash
         run: |
           set -euo pipefail
@@ -367,11 +369,67 @@ jobs:
           # --skip-clean：工作区本来就是干净的，省掉一次 flutter clean。
           fastforge package \
             --platform=linux \
-            --targets=deb,rpm,pacman,appimage \
+            --targets=deb,rpm,pacman \
             --skip-clean \
             --hook-pre 'bash .github/scripts/bundle-linux.sh "$BUILD_OUTPUT_DIRECTORY"'
 
           ls -lhR dist
+
+      - name: 打包 AppImage
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ needs.meta.outputs.version }}"
+          bundle="build/linux/x64/release/bundle"
+          appdir="$RUNNER_TEMP/CMSPlayer.AppDir"
+
+          # 这里刻意不走 fastforge 的 appimage maker：它会对 AppDir/lib/ 下的
+          # 每个 .so 跑一遍 ldd -d，把解析到的库再拷一份进 usr/lib/。
+          # 而 ldd 对未解析依赖只会打 "libjvm.so => not found"，maker 却把
+          # "=> " 后面的第一段当路径直接 cp，于是报
+          #   cp: cannot stat 'not': No such file or directory
+          # 我们这个 bundle 本来就已经自包含（RPATH 指向 $ORIGIN:$ORIGIN/lib），
+          # 它要做的这件事纯属多余，所以改成直接用 appimagetool 打包，
+          # 一个 ldd 都不用跑。
+          rm -rf "$appdir"
+          cp -r "$bundle" "$appdir"
+
+          # AppImage 的入口脚本。二进制的 RPATH 已经指向同目录的 lib/，
+          # 这里再显式补一层 LD_LIBRARY_PATH 兜底。
+          # 用 printf 逐行拼而不是 heredoc：YAML 块标量会剥掉缩进，
+          # heredoc 的结束定界符位置很容易在多层缩进里写错。
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'cd "$(dirname "$0")"' \
+            'export LD_LIBRARY_PATH="$PWD/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' \
+            'exec ./cms_player "$@"' \
+            > "$appdir/AppRun"
+          chmod +x "$appdir/AppRun"
+
+          printf '%s\n' \
+            '[Desktop Entry]' \
+            'Type=Application' \
+            'Name=CMSPlayer' \
+            'GenericName=视频播放器' \
+            'Comment=macCMS / 苹果CMS 资源站播放器' \
+            'Exec=cms_player %U' \
+            'Icon=cms_player' \
+            'Terminal=false' \
+            'Categories=AudioVideo;Video;' \
+            'Keywords=CMS;macCMS;VOD;Player;' \
+            'StartupNotify=true' \
+            > "$appdir/cms_player.desktop"
+
+          # AppDir 根下要有一份与 .desktop 里 Icon= 同名的图标，
+          # appimagetool 靠它做应用图标；顺手也放一份到 hicolor 目录。
+          cp assets/icons/app_icon.png "$appdir/cms_player.png"
+          mkdir -p "$appdir/usr/share/icons/hicolor/256x256/apps"
+          cp assets/icons/app_icon.png \
+             "$appdir/usr/share/icons/hicolor/256x256/apps/cms_player.png"
+
+          # PATH 上装的是 appimagetool 解包后的 AppRun，已经绕开了 FUSE
+          ARCH=x86_64 appimagetool --no-appstream \
+            "$appdir" "dist/CMSPlayer-$v-linux-x64.AppImage"
 
       - name: 打包免依赖便携版并统一命名
         shell: bash
@@ -390,15 +448,13 @@ jobs:
           rm -rf dist/CMSPlayer-linux-x64
 
           # fastforge 的产物落在 dist/<pubspec版本>/ 下，文件名是它自己的默认规则，
-          # 这里改成本发行版统一的命名。后缀取自 packageFormat，
-          # 注意 appimage 那个后缀是大写的 AppImage。
+          # 这里改成本发行版统一的命名。后缀取自 packageFormat。
           for f in dist/*/cms_player-*-linux.*; do
             [ -e "$f" ] || continue
             case "$f" in
-              *.deb)                out="CMSPlayer-$v-linux-x64.deb" ;;
-              *.rpm)                out="CMSPlayer-$v-linux-x64.rpm" ;;
-              *.pacman)             out="CMSPlayer-$v-linux-x64.pacman.pkg.tar.xz" ;;
-              *.AppImage|*.appimage) out="CMSPlayer-$v-linux-x64.AppImage" ;;
+              *.deb)    out="CMSPlayer-$v-linux-x64.deb" ;;
+              *.rpm)    out="CMSPlayer-$v-linux-x64.rpm" ;;
+              *.pacman) out="CMSPlayer-$v-linux-x64.pacman.pkg.tar.xz" ;;
               *) continue ;;
             esac
             mv "$f" "dist/$out"
