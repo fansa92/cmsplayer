@@ -708,24 +708,37 @@ class _PlayerControlsState extends State<PlayerControls> {
 
   // ---------------------------------------------------------------- 面板
 
+  /// 倍速弹层。
+  ///
+  /// 必须限高 + 可滚动：showModalBottomSheet 默认只给屏高 9/16，手机横屏
+  /// 时高度约 390px，8 个倍速选项根本放不下，不滚动的话只能看到前几个。
+  /// 这里的写法与 [_showEpisodeSheet] 保持一致。
   Future<void> _showRateSheet(BuildContext context) async {
     final double? result = await showModalBottomSheet<double>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (BuildContext ctx) => SafeArea(
-        child: Wrap(
-          children: <Widget>[
-            for (final double rate in K.playRates)
-              ListTile(
-                dense: true,
-                leading: Icon(
-                  rate == controller.rate ? Icons.check : Icons.speed,
-                  size: 20,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.6,
+          ),
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.only(bottom: 8),
+            children: <Widget>[
+              for (final double rate in K.playRates)
+                ListTile(
+                  dense: true,
+                  leading: Icon(
+                    rate == controller.rate ? Icons.check : Icons.speed,
+                    size: 20,
+                  ),
+                  title: Text('${rate}x'),
+                  onTap: () => Navigator.of(ctx).pop(rate),
                 ),
-                title: Text('${rate}x'),
-                onTap: () => Navigator.of(ctx).pop(rate),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
