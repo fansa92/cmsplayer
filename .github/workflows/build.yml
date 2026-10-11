@@ -5,6 +5,11 @@ on:
     tags: ['v*']
   workflow_dispatch:
     inputs:
+      version:
+        description: "手动指定版本号（留空则自动：打了 v* 标签用标签，否则 pubspec 版本-dev.短提交）"
+        type: string
+        required: false
+        default: ''
       skip_apple:
         description: "跳过 macOS / iOS 构建（macOS runner 按 10 倍分钟计费）"
         type: boolean
@@ -61,8 +66,15 @@ jobs:
       - uses: actions/checkout@v5
       - id: v
         shell: bash
+        env:
+          # 手动触发时可以填版本号；tag push 时 inputs 为空，走下面的自动分支
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          # 优先级：手动填的 > 标签 > pubspec 版本 + 短提交
+          raw="${INPUT_VERSION#v}"
+          if [[ -n "$raw" ]]; then
+            version="$raw"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
             base="$(sed -n 's/^version: *//p' pubspec.yaml | cut -d+ -f1)"
@@ -229,12 +241,14 @@ jobs:
         shell: pwsh
         run: |
           $v = "${{ needs.meta.outputs.version }}"
-          # 顶层目录名与包名保持一致（小写 cmsplayer），解压后不会在当前
-          # 目录下散落一堆 exe / dll。
+          # zip 内直接放文件，不再套一层 cmsplayer-windows-x64 ——
+          # 解压后拿到的就是 exe / dll，不必再点进一层目录。
+          # staging 目录仍要用，否则 Compress-Archive 会把 Release 下的
+          # 东西连同无关文件一起收进去。
           $stage = "dist/cmsplayer-windows-x64"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item "build/windows/x64/runner/Release/*" $stage -Recurse -Force
-          Compress-Archive -Path $stage -DestinationPath "dist/CMSPlayer-$v-windows-x64.zip" -Force
+          Compress-Archive -Path "$stage\*" -DestinationPath "dist/CMSPlayer-$v-windows-x64.zip" -Force
           Get-ChildItem -Recurse dist | Select-Object FullName, Length
 
       - name: 上传产物
