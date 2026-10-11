@@ -69,7 +69,7 @@ class VodRepository {
       'ps': pageSize,
       't': typeId,
       'wd': keyword,
-      'yy': year,
+      'year': year,
       'area': area,
       'lang': lang,
       'by': sortBy,

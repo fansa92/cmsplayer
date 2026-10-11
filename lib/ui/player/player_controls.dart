@@ -7,6 +7,7 @@ import '../../core/constants.dart';
 import '../../core/utils/formatter.dart';
 import '../../core/utils/responsive.dart';
 import '../../data/models/play_line.dart';
+import 'battery_badge.dart';
 import 'player_controller.dart';
 import 'player_window.dart';
 
@@ -177,6 +178,10 @@ class _PlayerControlsState extends State<PlayerControls> {
     final bool repeat = event is KeyRepeatEvent;
     final LogicalKeyboardKey key = event.logicalKey;
 
+    // 锁定 = 禁止播放组件，键盘上的播放键一并吃掉。这里吞掉而不是放行，
+    // 否则按键会穿透到播放页底下的列表上去。
+    final bool locked = controller.locked;
+
     switch (key) {
       case LogicalKeyboardKey.escape:
         // 有焦点就说明播放页在最上层，重复触发无副作用。
@@ -186,12 +191,14 @@ class _PlayerControlsState extends State<PlayerControls> {
       // 播放控制类按键不吃长按重复，否则按住空格会疯狂切换暂停。
       case LogicalKeyboardKey.space:
       case LogicalKeyboardKey.keyK:
+        if (locked) return KeyEventResult.handled;
         if (!repeat) {
           controller.togglePlay();
           _show();
         }
         return KeyEventResult.handled;
 
+      // F 只改窗口形态，不碰播放内容，锁定时照常可用。
       case LogicalKeyboardKey.keyF:
         if (!repeat) _toggleFullScreen();
         return KeyEventResult.handled;
@@ -199,6 +206,7 @@ class _PlayerControlsState extends State<PlayerControls> {
       // 下面这些按键长按应当连续生效（按住方向键持续快进 / 调音量）。
       case LogicalKeyboardKey.arrowLeft:
       case LogicalKeyboardKey.keyJ:
+        if (locked) return KeyEventResult.handled;
         controller.seekBy(const Duration(seconds: -10));
         _showOsd('快退 10 秒');
         _show();
@@ -206,16 +214,19 @@ class _PlayerControlsState extends State<PlayerControls> {
 
       case LogicalKeyboardKey.arrowRight:
       case LogicalKeyboardKey.keyL:
+        if (locked) return KeyEventResult.handled;
         controller.seekBy(const Duration(seconds: 10));
         _showOsd('快进 10 秒');
         _show();
         return KeyEventResult.handled;
 
       case LogicalKeyboardKey.arrowUp:
+        if (locked) return KeyEventResult.handled;
         _stepVolume(5);
         return KeyEventResult.handled;
 
       case LogicalKeyboardKey.arrowDown:
+        if (locked) return KeyEventResult.handled;
         _stepVolume(-5);
         return KeyEventResult.handled;
 
@@ -288,10 +299,13 @@ class _PlayerControlsState extends State<PlayerControls> {
         return Stack(
           fit: StackFit.expand,
           children: <Widget>[
-            // 底层手势区：始终铺满。锁定时全部回调置 null。
+            // 底层手势区：始终铺满。锁定时播放类手势全部置空。
+            //
+            // 单击是唯一保留的手势 —— 它只是唤出 / 收起控制栏，本身不改变播放。
+            // 少了它，返回按钮一旦被收起就再也点不到，等于把人锁死在播放页里。
             GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: locked ? null : () {
+              onTap: () {
                 _focusNode.requestFocus();
                 _toggle();
               },
@@ -314,38 +328,21 @@ class _PlayerControlsState extends State<PlayerControls> {
                 onRetry: controller.retry,
               ),
 
-            if (controller.locked)
-              Center(
-                child: IconButton(
-                  tooltip: '解锁',
-                  iconSize: 36,
-                  color: Colors.white,
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.black45,
-                    padding: const EdgeInsets.all(16),
-                  ),
-                  onPressed: () {
-                    controller.toggleLock();
-                    _show();
-                  },
-                  icon: const Icon(Icons.lock),
-                ),
-              )
-            else ...<Widget>[
-              if (_visible) ...<Widget>[
-                _buildTopBar(context),
-                _buildCenter(context),
-                _buildBottomBar(context),
-              ],
-              _buildGestureIndicator(context),
+            if (_visible) ...<Widget>[
+              // 锁已经挪到播放键左侧（见 _buildCenter），顶栏只负责
+              // 「返回 + 标题 + 电量 + 各平台的功能键」。
+              _buildTopBar(context, locked: locked),
+              _buildCenter(context, locked: locked),
+              if (!locked) _buildBottomBar(context),
             ],
+            _buildGestureIndicator(context),
           ],
         );
       },
     );
   }
 
-  Widget _buildTopBar(BuildContext context) {
+  Widget _buildTopBar(BuildContext context, {required bool locked}) {
     final ThemeData theme = Theme.of(context);
     final bool isLandscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
@@ -402,7 +399,9 @@ class _PlayerControlsState extends State<PlayerControls> {
                 ],
               ),
             ),
-            if (PlatformInfo.isMobile)
+            // 电量是纯信息，锁定时照样显示 —— 看片最怕的就是突然没电。
+            if (PlatformInfo.isMobile) const BatteryBadge(),
+            if (PlatformInfo.isMobile && !locked)
               IconButton(
                 tooltip: isLandscape ? '切换到竖屏' : '横屏播放',
                 color: Colors.white,
@@ -418,60 +417,84 @@ class _PlayerControlsState extends State<PlayerControls> {
                 icon: Icon(
                   _fullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
                 ),
-                onPressed: _toggleFullScreen,
+                onPressed: locked ? null : _toggleFullScreen,
               ),
-            IconButton(
-              tooltip: '选集',
-              color: Colors.white,
-              icon: const Icon(Icons.playlist_play),
-              onPressed: () {
-                _showEpisodeSheet(context);
-                _scheduleHide();
-              },
-            ),
-            IconButton(
-              tooltip: controller.locked ? '已锁定，点击解锁' : '锁定屏幕',
-              color: Colors.white,
-              icon: Icon(controller.locked ? Icons.lock : Icons.lock_open),
-              onPressed: () {
-                controller.toggleLock();
-                _show();
-              },
-            ),
+            if (!locked)
+              IconButton(
+                tooltip: '选集',
+                color: Colors.white,
+                icon: const Icon(Icons.playlist_play),
+                onPressed: () {
+                  _showEpisodeSheet(context);
+                  _scheduleHide();
+                },
+              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildCenter(BuildContext context) {
+  /// 画面中央：锁 + 播放键。
+  ///
+  /// 锁固定在播放键的左侧，是这一行里最靠左的一个。它跟其余控件一样挂在
+  /// [_visible] 下面自动隐藏，单击画面即可重新唤出。
+  ///
+  /// 锁原先挤在顶栏最右端，手机上顶栏还要留给标题、电量、横屏和选集，
+  /// 挤在角落里既难找又容易在返回时误触；挪到播放键旁边后位置固定、
+  /// 也好按。
+  Widget _buildCenter(BuildContext context, {required bool locked}) {
     final bool showSpinner = controller.buffering || controller.starting;
 
     return Center(
-      child: showSpinner
-          ? const SizedBox(
-              width: 44,
-              height: 44,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                color: Colors.white,
-              ),
-            )
-          : IconButton(
-              iconSize: 56,
-              color: Colors.white,
-              style: IconButton.styleFrom(
-                backgroundColor: Colors.black38,
-                padding: const EdgeInsets.all(20),
-              ),
-              onPressed: () {
-                controller.togglePlay();
-                _show();
-              },
-              icon: Icon(
-                controller.playing ? Icons.pause : Icons.play_arrow,
-              ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          IconButton(
+            tooltip: locked ? '已锁定播放控件，点击解锁' : '锁定播放控件',
+            iconSize: 40,
+            color: Colors.white,
+            style: IconButton.styleFrom(
+              backgroundColor: Colors.black38,
+              padding: const EdgeInsets.all(12),
             ),
+            onPressed: () {
+              controller.toggleLock();
+              _show();
+            },
+            icon: Icon(locked ? Icons.lock : Icons.lock_open),
+          ),
+          // 锁定时播放键与缓冲圈干脆不渲染，而不是灰着摆在那儿 ——
+          // 灰按钮只会让人以为界面卡住了。
+          if (!locked) ...<Widget>[
+            const SizedBox(width: 16),
+            showSpinner
+                ? const SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3,
+                      color: Colors.white,
+                    ),
+                  )
+                : IconButton(
+                    iconSize: 56,
+                    color: Colors.white,
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.black38,
+                      padding: const EdgeInsets.all(20),
+                    ),
+                    onPressed: () {
+                      controller.togglePlay();
+                      _show();
+                    },
+                    icon: Icon(
+                      controller.playing ? Icons.pause : Icons.play_arrow,
+                    ),
+                  ),
+          ],
+        ],
+      ),
     );
   }
 

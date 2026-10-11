@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 
 import 'package:cms_player/core/utils/text_utils.dart';
 import 'package:cms_player/core/utils/formatter.dart';
@@ -260,4 +261,73 @@ void main() {
       expect(VodCategory.leafOnly(const <VodCategory>[]), isEmpty);
     });
   });
+
+  group('查询参数（对齐线上真实行为）', () {
+    // 实测 cj.ffzyapi.com：`year=2024` 把 total 从 98497 压到 10963 且返回项
+    // 全部是 2024；`yy=2024` 与不带参数的结果 total 和 id 序列完全一致，
+    // 即被源站彻底忽略。这里守住参数名，防止回归。
+    test('年份走 year 参数，不发 yy', () async {
+      final _RecordingClient client = _RecordingClient(
+        '{"total":1,"limit":"20","list":[{"vod_id":1,"vod_name":"a"}]}',
+      );
+      final MacCmsApi api = MacCmsApi(
+        VodSource.fromRaw(<String, Object>{
+          'name': 't',
+          'api': 'https://x.example/api.php/provide/vod/',
+        }),
+        client: client,
+      );
+
+      await api.query(year: '2024', area: '美国', sortBy: 'hits');
+
+      final Map<String, String> q = client.lastUri!.queryParameters;
+      expect(q['ac'], 'list');
+      expect(q['year'], '2024');
+      expect(q.containsKey('yy'), isFalse, reason: 'yy 会被源站忽略，等于没筛');
+      expect(q['area'], '美国');
+      expect(q['by'], 'hits');
+    });
+
+    test('未选中的筛选项不发送对应参数', () async {
+      final _RecordingClient client = _RecordingClient(
+        '{"total":0,"limit":"20","list":[]}',
+      );
+      final MacCmsApi api = MacCmsApi(
+        VodSource.fromRaw(<String, Object>{
+          'name': 't',
+          'api': 'https://x.example/api.php/provide/vod/',
+        }),
+        client: client,
+      );
+
+      await api.query();
+
+      final Map<String, String> q = client.lastUri!.queryParameters;
+      for (final String k
+          in <String>['year', 'area', 'lang', 'by', 'wd', 't']) {
+        expect(q.containsKey(k), isFalse, reason: '$k 不应出现在请求里');
+      }
+    });
+  });
+}
+
+/// 截获真实请求 URL 的 http 客户端，用来断言线上参数。
+class _RecordingClient extends http.BaseClient {
+  _RecordingClient(this._body);
+
+  final String _body;
+  Uri? lastUri;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    lastUri = request.url;
+    return http.StreamedResponse(
+      Stream<List<int>>.fromIterable(<List<int>>[utf8.encode(_body)]),
+      200,
+      headers: <String, String>{
+        'content-type': 'application/json; charset=utf-8',
+      },
+      request: request,
+    );
+  }
 }

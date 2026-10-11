@@ -28,11 +28,12 @@ dependencies:
   path_provider: ^2.1.5
   path: ^1.9.0
 
-  # ---------- 播放器辅助（音量 / 亮度 / 常亮 / 桌面窗口） ----------
+  # ---------- 播放器辅助（音量 / 亮度 / 常亮 / 桌面窗口 / 电量） ----------
   screen_brightness: ^2.1.11
   volume_controller: ^3.7.1
   wakelock_plus: ^1.2.8
   window_manager: ^0.5.2
+  battery_plus: ^7.1.2
 
 dev_dependencies:
   flutter_test:

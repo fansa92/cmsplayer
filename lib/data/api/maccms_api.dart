@@ -22,8 +22,8 @@ import '../models/vod_source.dart';
 /// | `pagesize` / `limit` | 每页条数 |
 /// | `wd` | 关键词搜索 |
 /// | `ids` | 按 ID 查询，逗号分隔 |
-/// | `yy` / `area` / `lang` | 年代 / 地区 / 语言 |
-/// | `by` | 排序：`time` / `hits` / `score` / `input` |
+/// | `year` / `area` / `lang` | 年代 / 地区 / 语言 |
+/// | `by` | 排序：`time` / `hits` / `score` / `input`（部分源不响应，见下） |
 /// | `h` / `m` | 24 小时 / 本月热播 |
 class MacCmsApi {
   MacCmsApi(this.source, {http.Client? client})
@@ -116,8 +116,11 @@ class MacCmsApi {
     if (typeId > 0) params['t'] = '$typeId';
     final String? kw = keyword?.trim();
     if (kw != null && kw.isNotEmpty) params['wd'] = kw;
+    // 注意：macCMS 的年份参数是 `year`，不是 `yy`。
+    // 实测 cj.ffzyapi.com：`year=2024` total 98497→10963 且返回项全部为 2024；
+    // `yy=2024` 与不带参数的结果 total 和 id 序列完全一致，即被彻底忽略。
     final String? yy = year?.trim();
-    if (yy != null && yy.isNotEmpty) params['yy'] = yy;
+    if (yy != null && yy.isNotEmpty) params['year'] = yy;
     final String? ar = area?.trim();
     if (ar != null && ar.isNotEmpty) params['area'] = ar;
     final String? lg = lang?.trim();
