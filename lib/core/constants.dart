@@ -50,6 +50,7 @@ class K {
   static const String boxFavorites = 'favorites.json';
   static const String boxHistory = 'history.json';
   static const String boxSearches = 'searches.json';
+  static const String boxSyncTombstones = 'sync_tombstones.json';
 
   static const String prefThemeMode = 'theme_mode';
   static const String prefActiveSource = 'active_source_id';
@@ -61,6 +62,25 @@ class K {
   static const String prefShowControlsOnStart = 'show_controls_on_start';
   static const String prefHardwareDecode = 'hardware_decode';
   static const String prefImageCacheBytes = 'image_cache_bytes';
+
+  // ---------------- 同步 ----------------
+  static const Duration syncTimeout = Duration(seconds: 25);
+
+  /// 远端文件路径。挂在根目录下很容易撞上别人的文件，所以默认收进子目录。
+  static const String defaultWebDavPath = '/cmsplayer/sync.json';
+
+  /// 局域网同步端口与设备发现端口。
+  static const int defaultLanPort = 8765;
+  static const int lanDiscoveryPort = 9877;
+
+  static const String prefWebDavUrl = 'sync_webdav_url';
+  static const String prefWebDavUser = 'sync_webdav_user';
+  static const String prefWebDavPass = 'sync_webdav_pass';
+  static const String prefWebDavPath = 'sync_webdav_path';
+  static const String prefLanHost = 'sync_lan_host';
+  static const String prefLanPort = 'sync_lan_port';
+  static const String prefLastSyncAt = 'sync_last_at';
+  static const String prefDeviceName = 'sync_device_name';
 
   // ---------------- 列表 / 详情页 ----------------
   static const List<int> pageSizes = <int>[12, 20, 24, 30, 36, 48];
@@ -75,7 +95,7 @@ class K {
     'input': '最多推荐',
   };
 
-  /// 分类筛选项：年代（macCMS 的 `yy` 参数）。
+  /// 分类筛选项：年代（macCMS 的 `year` 参数）。
   static const List<String> yearOptions = <String>[
     '2026', '2025', '2024', '2023', '2022', '2021', '2020',
     '2019', '2018', '2017', '2016', '2015', '2014', '2013',

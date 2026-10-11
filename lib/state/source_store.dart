@@ -8,6 +8,8 @@ import '../data/api/source_importer.dart';
 import '../data/models/vod_source.dart';
 import '../data/repository/source_repository.dart';
 import '../data/repository/vod_repository.dart';
+import '../data/sync/sync_payload.dart';
+import '../data/sync/sync_tombstones.dart';
 
 /// 资源站列表的状态：增删改查、排序、启用、连通性测试、JSON 导入导出。
 class SourceStore extends ChangeNotifier {
@@ -51,6 +53,12 @@ class SourceStore extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------- 生命周期
+
+  /// 本表在墓碑里的类型名。
+  ///
+  /// 删除本地数据时必须顺手记一条墓碑，否则对方设备下次同步会把这条源
+  /// 又推回来 —— 删除看起来"没生效"。见 [SyncTombstones]。
+  static const String tombstoneType = SyncBox.sources;
 
   Future<void> load() async {
     _loading = true;
@@ -146,14 +154,23 @@ class SourceStore extends ChangeNotifier {
 
   Future<void> remove(String id) async {
     _sources.removeWhere((VodSource s) => s.id == id);
+    // 先记墓碑再落盘：反过来的话，进程在这中间被杀掉就会留下"数据删了但
+    // 墓碑没记"的状态，同步时对方会把这条源原样推回来。
+    await SyncTombstones.instance.mark(tombstoneType, id);
     await _persist();
     _ensureActive();
     _emit();
   }
 
-  Future<void> removeMany(List<String> ids) async {
-    final Set<String> set = ids.toSet();
+  Future<void> removeMany(List<String> keys) async {
+    final Set<String> set = keys.toSet();
+    final List<String> removed = _sources
+        .where((VodSource s) => set.contains(s.id))
+        .map((VodSource s) => s.id)
+        .toList(growable: false);
+    if (removed.isEmpty) return;
     _sources.removeWhere((VodSource s) => set.contains(s.id));
+    await SyncTombstones.instance.markMany(tombstoneType, removed);
     await _persist();
     _ensureActive();
     _emit();
@@ -273,8 +290,13 @@ class SourceStore extends ChangeNotifier {
 
   /// 清空所有源。
   Future<void> clearAll() async {
+    // 清空是逐条删除的等价物，要把当时存在的每一条都记成墓碑 —— 只清本地
+    // 的话，其他设备下次同步会把整个源列表又推回来。
+    final List<String> ids =
+        _sources.map((VodSource s) => s.id).toList(growable: false);
     _sources = <VodSource>[];
     _activeId = '';
+    await SyncTombstones.instance.markMany(tombstoneType, ids);
     await _persist();
     VodRepository.instance.clearAll();
     _emit();

@@ -6,6 +6,11 @@
 	<true/>
 	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
+	<!-- 拉资源站接口、WebDAV、连局域网主机，全都要出站连接。
+	     沙箱下不写这一条，Release 构建连一个资源站都访问不了。 -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- 局域网主机模式要监听端口，让同网段的设备连过来。 -->
 	<key>com.apple.security.network.server</key>
 	<true/>
 </dict>

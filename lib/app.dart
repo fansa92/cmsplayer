@@ -10,6 +10,7 @@ import 'state/favorites_store.dart';
 import 'state/history_store.dart';
 import 'state/search_store.dart';
 import 'state/source_store.dart';
+import 'state/sync_store.dart';
 import 'ui/shell/app_shell.dart';
 
 /// 应用根组件：负责依赖注入与主题切换。
@@ -30,6 +31,17 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
   late final FavoritesStore _favoritesStore = FavoritesStore();
   late final HistoryStore _historyStore = HistoryStore();
 
+  /// 同步。依赖上面三个 Store —— [SyncStore] 的构造参数就是它们。
+  ///
+  /// `late final` 是惰性初始化的，首次访问时才构造，所以这里引用前面的
+  /// 字段不会踩到初始化顺序问题。
+  late final SyncStore _syncStore = SyncStore(
+    widget.settings,
+    _historyStore,
+    _favoritesStore,
+    _sourceStore,
+  );
+
   @override
   void initState() {
     super.initState();
@@ -40,6 +52,9 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
     await _sourceStore.load();
     await _favoritesStore.load();
     await _historyStore.load();
+    // 同步配置只是读几个字符串，不值得塞进上面的 await 链里拖慢启动；
+    // 但要保证同步页第一次打开时它已经就绪。
+    _syncStore.load();
   }
 
   @override
@@ -50,6 +65,7 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
     _searchStore.dispose();
     _favoritesStore.dispose();
     _historyStore.dispose();
+    _syncStore.dispose();
     super.dispose();
   }
 
@@ -63,6 +79,7 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
         ChangeNotifierProvider<SearchStore>.value(value: _searchStore),
         ChangeNotifierProvider<FavoritesStore>.value(value: _favoritesStore),
         ChangeNotifierProvider<HistoryStore>.value(value: _historyStore),
+        ChangeNotifierProvider<SyncStore>.value(value: _syncStore),
       ],
       child: Consumer<AppState>(
         builder: (BuildContext context, AppState app, _) {

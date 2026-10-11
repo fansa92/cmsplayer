@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- 局域网同步要在同网段内收发数据，iOS 14+ 会弹本地网络权限框。
+	     不写这条说明，弹框上只有一句干巴巴的"是否允许"，用户没理由放行。 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>用于在同一网络下的其他设备之间同步播放记录、收藏和源列表。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

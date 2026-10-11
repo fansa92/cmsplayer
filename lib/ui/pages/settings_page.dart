@@ -9,7 +9,9 @@ import '../../state/app_state.dart';
 import '../../state/favorites_store.dart';
 import '../../state/history_store.dart';
 import '../../state/source_store.dart';
+import '../../state/sync_store.dart';
 import '../actions.dart';
+import 'sync_page.dart';
 
 /// 设置页。
 class SettingsPage extends StatefulWidget {
@@ -37,6 +39,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     final AppState app = context.watch<AppState>();
     final SourceStore sources = context.watch<SourceStore>();
+    final SyncStore sync = context.watch<SyncStore>();
 
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
@@ -101,6 +104,16 @@ class _SettingsPageState extends State<SettingsPage> {
             onChanged: (bool v) => app.setMultiSourceSearch(v),
           ),
 
+          const _SectionLabel('同步'),
+          ListTile(
+            leading: const Icon(Icons.sync_outlined),
+            title: const Text('数据同步'),
+            subtitle: Text(_syncSubtitle(sync.lastSyncAt)),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const SyncPage()),
+            ),
+          ),
+
           const _SectionLabel('存储'),
           ListTile(
             leading: const Icon(Icons.cached),
@@ -155,6 +168,29 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+  }
+
+  /// 同步入口的副标题。
+  ///
+  /// 用相对时间而不是完整时间戳：这一行只是提示"上次同步过"，
+  /// 精确到分钟毫无价值，反而占地方。
+  String _syncSubtitle(DateTime? at) {
+    if (at == null) return '把播放记录、收藏和源列表同步到其他设备';
+    final Duration d = DateTime.now().difference(at);
+    final String ago;
+    if (d.inMinutes < 1) {
+      ago = '刚刚';
+    } else if (d.inHours < 1) {
+      ago = '${d.inMinutes} 分钟前';
+    } else if (d.inDays < 1) {
+      ago = '${d.inHours} 小时前';
+    } else if (d.inDays < 30) {
+      ago = '${d.inDays} 天前';
+    } else {
+      ago = '${at.year}-${at.month.toString().padLeft(2, '0')}-'
+          '${at.day.toString().padLeft(2, '0')}';
+    }
+    return '上次同步 $ago';
   }
 
   String _themeLabel(ThemeMode mode) {

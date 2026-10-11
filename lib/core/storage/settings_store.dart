@@ -98,6 +98,66 @@ class SettingsStore {
     await _prefs?.setBool(K.prefMultiSourceSearch, v);
   }
 
+  // ---------------- 同步 ----------------
+  //
+  // WebDAV 密码按明文存在应用配置里。这个应用不联网上送任何用户数据，
+  // 但本机被他人拿到就能读到 —— 设置页里如实写明了这一点，不假装加密。
+
+  String get syncWebDavUrl => _prefs?.getString(K.prefWebDavUrl) ?? '';
+
+  Future<void> setSyncWebDavUrl(String v) async {
+    await _prefs?.setString(K.prefWebDavUrl, v);
+  }
+
+  String get syncWebDavUser => _prefs?.getString(K.prefWebDavUser) ?? '';
+
+  Future<void> setSyncWebDavUser(String v) async {
+    await _prefs?.setString(K.prefWebDavUser, v);
+  }
+
+  String get syncWebDavPass => _prefs?.getString(K.prefWebDavPass) ?? '';
+
+  Future<void> setSyncWebDavPass(String v) async {
+    await _prefs?.setString(K.prefWebDavPass, v);
+  }
+
+  String get syncWebDavPath {
+    final String v = _prefs?.getString(K.prefWebDavPath) ?? '';
+    return v.trim().isEmpty ? K.defaultWebDavPath : v.trim();
+  }
+
+  Future<void> setSyncWebDavPath(String v) async {
+    await _prefs?.setString(K.prefWebDavPath, v);
+  }
+
+  String get syncLanHost => _prefs?.getString(K.prefLanHost) ?? '';
+
+  Future<void> setSyncLanHost(String v) async {
+    await _prefs?.setString(K.prefLanHost, v);
+  }
+
+  int get syncLanPort {
+    final int v = _prefs?.getInt(K.prefLanPort) ?? 0;
+    return v > 0 ? v : K.defaultLanPort;
+  }
+
+  Future<void> setSyncLanPort(int v) async {
+    await _prefs?.setInt(K.prefLanPort, v);
+  }
+
+  /// 上次同步时刻（毫秒）。0 表示从没同步过。
+  int get syncLastAt => _prefs?.getInt(K.prefLastSyncAt) ?? 0;
+
+  Future<void> setSyncLastAt(int v) async {
+    await _prefs?.setInt(K.prefLastSyncAt, v);
+  }
+
+  String get syncDeviceName => _prefs?.getString(K.prefDeviceName) ?? '';
+
+  Future<void> setSyncDeviceName(String v) async {
+    await _prefs?.setString(K.prefDeviceName, v);
+  }
+
   /// 设置是否真的落盘成功（用于"设置已保存"的提示）。
   bool get persisted => _ok;
 }
