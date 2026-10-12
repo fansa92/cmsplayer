@@ -26,6 +26,46 @@ class HomePage extends StatelessWidget {
 
     final Map<String, String> headers = source.headers;
 
+    // 只有冷启动（既没有内容、分类条也还不存在）才整页加载。切分类时
+    // 必须保留头部与分类条：整页换成加载态会把横向滚动的分类条卸掉，
+    // 加载完重建后滚动位置归零，选中靠后的分类就会"跳回"最前面几个。
+    if (browse.loading &&
+        browse.items.isEmpty &&
+        browse.selectableCategories.isEmpty) {
+      return const PageLoading();
+    }
+
+    return RefreshIndicator(
+      onRefresh: () => browse.refresh(force: true),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          _SectionHeader(
+            title: '为你推荐',
+            subtitle: '${browse.categoryTitle} · 共 ${browse.total} 部',
+            onRefresh: () => browse.refresh(force: true),
+          ),
+          if (browse.selectableCategories.isNotEmpty)
+            _CategoryChips(browse: browse),
+          const SizedBox(height: 4),
+          Expanded(
+            child: _buildBody(context, browse, source, headers, history),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 网格区域的状态切换：加载 / 出错 / 空 / 正常。
+  ///
+  /// 与分类页保持一致，只换这一块，不整页替换。
+  Widget _buildBody(
+    BuildContext context,
+    BrowseStore browse,
+    VodSource source,
+    Map<String, String> headers,
+    HistoryStore history,
+  ) {
     if (browse.loading && browse.items.isEmpty) {
       return const PageLoading();
     }
@@ -47,35 +87,17 @@ class HomePage extends StatelessWidget {
       );
     }
 
-    return RefreshIndicator(
-      onRefresh: () => browse.refresh(force: true),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          _SectionHeader(
-            title: '为你推荐',
-            subtitle: '${browse.categoryTitle} · 共 ${browse.total} 部',
-            onRefresh: () => browse.refresh(force: true),
-          ),
-          if (browse.selectableCategories.isNotEmpty)
-            _CategoryChips(browse: browse),
-          const SizedBox(height: 4),
-          Expanded(
-            child: VodGrid(
-              items: browse.items,
-              headers: headers,
-              canLoadMore: browse.canLoadMore,
-              loadingMore: browse.loadingMore,
-              onLoadMore: browse.loadMore,
-              progressOf: (VodItem item) => _progressOf(history, source, item),
-              onTap: (VodItem item) => AppRoutes.openDetail(
-                context,
-                item: item,
-                source: source,
-              ),
-            ),
-          ),
-        ],
+    return VodGrid(
+      items: browse.items,
+      headers: headers,
+      canLoadMore: browse.canLoadMore,
+      loadingMore: browse.loadingMore,
+      onLoadMore: browse.loadMore,
+      progressOf: (VodItem item) => _progressOf(history, source, item),
+      onTap: (VodItem item) => AppRoutes.openDetail(
+        context,
+        item: item,
+        source: source,
       ),
     );
   }
