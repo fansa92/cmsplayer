@@ -268,20 +268,60 @@ class PlayerController extends ChangeNotifier {
       _videoHeight = h;
       _emit();
     }));
-    _subs.add(_player.stream.track.listen((Track t) {
-      // track 一次带回全部音视频属性，比分开订阅 width/codec/fps 更省。
-      _videoFps = t.video.fps;
-      _videoCodec = t.video.codec;
-      _videoDecoder = t.video.decoder;
-      _audioCodec = t.audio.codec;
-      _audioChannels = t.audio.channels;
-      _audioSampleRate = t.audio.samplerate;
+    // 注意：要用复数 tracks（本文件里可用的轨），不能用单数 track。
+    // 单数 track 只有在显式调用过 setVideoTrack / setAudioTrack 后才会带上
+    // codec 等属性，正常播放时它一直是空的 VideoTrack('auto', null, null)，
+    // 结果就是面板里编码 / 音频格式那几行永远不显示。
+    _subs.add(_player.stream.tracks.listen((Tracks ts) {
+      final VideoTrack? v = _firstRealVideo(ts.video);
+      final AudioTrack? a = _firstRealAudio(ts.audio);
+      _videoFps = v?.fps ?? _videoFps;
+      _videoCodec = v?.codec ?? _videoCodec;
+      _videoDecoder = v?.decoder ?? _videoDecoder;
+      _audioCodec = a?.codec ?? _audioCodec;
+      _audioChannels = a?.channels ?? _channelsOf(a) ?? _audioChannels;
+      _audioSampleRate = a?.samplerate ?? _audioSampleRate;
       _emit();
     }));
     _subs.add(_player.stream.videoParams.listen((VideoParams p) {
       _pixelFormat = p.pixelformat;
       _emit();
     }));
+    // 音频参数兜底：有些流 track-list 里不带 demux-channels / demux-samplerate，
+    // 但 audio-params 一定有（它是解码后的实际输出参数）。
+    _subs.add(_player.stream.audioParams.listen((AudioParams p) {
+      _audioChannels = _audioChannels ?? p.hrChannels ?? p.channels;
+      _audioSampleRate = _audioSampleRate ?? p.sampleRate;
+      _emit();
+    }));
+  }
+
+  // ---------------- tracks 选轨辅助 ----------------
+  //
+  // 复数 tracks 的头两项固定是 'auto' / 'no' 两个占位轨（codec 为 null），
+  // 真正的轨从下标 2 开始。挑第一条带 codec 的即可。
+
+  static VideoTrack? _firstRealVideo(List<VideoTrack> list) {
+    for (final VideoTrack t in list) {
+      if (t.id == 'auto' || t.id == 'no') continue;
+      if (t.codec != null && t.codec!.isNotEmpty) return t;
+    }
+    return null;
+  }
+
+  static AudioTrack? _firstRealAudio(List<AudioTrack> list) {
+    for (final AudioTrack t in list) {
+      if (t.id == 'auto' || t.id == 'no') continue;
+      if (t.codec != null && t.codec!.isNotEmpty) return t;
+    }
+    return null;
+  }
+
+  /// 声道数兜底：demux-channels 缺失时用 demux-channel-count 拼一个可读串。
+  static String? _channelsOf(AudioTrack? t) {
+    final int? n = t?.channelscount;
+    if (n == null || n <= 0) return null;
+    return '$n';
   }
 
   // ---------------------------------------------------------------- 打开

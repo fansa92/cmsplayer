@@ -838,31 +838,59 @@ class _PlayerControlsState extends State<PlayerControls> {
     );
   }
 
-  /// mpv 给的 codec 是 FourCC 之类的原始串（avc1 / hvc1 / mp4a），翻译成
-  /// 人看得懂的名字；认不出就原样显示，不瞎猜。
+  /// mpv track-list 的 `codec` 字段给的是短名（h264 / hevc / av1 / aac …），
+  /// 有时也会是 FourCC（avc1 / hvc1 / mp4a）。这里统一翻译成人看得懂的名字；
+  /// 认不出就原样显示，不瞎猜。
   static const Map<String, String> _codecNames = <String, String>{
+    // 视频
     'avc1': 'H.264 / AVC',
     'avc3': 'H.264 / AVC',
     'h264': 'H.264 / AVC',
+    'x264': 'H.264 / AVC',
     'hev1': 'H.265 / HEVC',
     'hvc1': 'H.265 / HEVC',
     'hevc': 'H.265 / HEVC',
+    'h265': 'H.265 / HEVC',
+    'x265': 'H.265 / HEVC',
     'vp09': 'VP9',
+    'vp9': 'VP9',
     'vp8': 'VP8',
+    'vp08': 'VP8',
     'av01': 'AV1',
+    'av1': 'AV1',
+    'mpeg2video': 'MPEG-2',
+    'mpeg2': 'MPEG-2',
+    'mpeg4': 'MPEG-4',
+    'xvid': 'MPEG-4 (Xvid)',
+    'theora': 'Theora',
+    'vc1': 'VC-1',
+    'wmv3': 'WMV3',
+    // 音频
     'mp4a': 'AAC',
     'aac': 'AAC',
+    'heaac': 'HE-AAC',
     'ac-3': 'AC-3',
+    'ac3': 'AC-3',
     'ec-3': 'E-AC-3',
+    'eac3': 'E-AC-3',
+    'dts': 'DTS',
     'opus': 'Opus',
     'vorbis': 'Vorbis',
     'flac': 'FLAC',
     'mp3': 'MP3',
+    'mp2': 'MP2',
+    'alac': 'ALAC',
+    'pcm': 'PCM',
+    'pcm_s16le': 'PCM (16-bit)',
+    'pcm_s24le': 'PCM (24-bit)',
+    'truehd': 'TrueHD',
+    'amr_nb': 'AMR-NB',
   };
 
   String _describeCodec(String? raw) {
     if (raw == null || raw.isEmpty) return '';
-    final String? name = _codecNames[raw.toLowerCase()];
+    final String key = raw.trim().toLowerCase();
+    final String? name = _codecNames[key];
     return name == null ? raw : '$name（$raw）';
   }
 
