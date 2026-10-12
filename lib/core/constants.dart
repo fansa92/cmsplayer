@@ -61,6 +61,7 @@ class K {
   static const String prefMultiSourceSearch = 'multi_source_search';
   static const String prefShowControlsOnStart = 'show_controls_on_start';
   static const String prefHardwareDecode = 'hardware_decode';
+  static const String prefEpisodeOrder = 'episode_order';
   static const String prefImageCacheBytes = 'image_cache_bytes';
 
   // ---------------- 同步 ----------------

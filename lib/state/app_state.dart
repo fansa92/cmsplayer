@@ -67,4 +67,12 @@ class AppState extends ChangeNotifier {
     await _settings.setMultiSourceSearch(v);
     notifyListeners();
   }
+
+  // ---------------- 详情页 ----------------
+  bool get episodeOrderReverse => _settings.episodeOrderReverse;
+
+  Future<void> setEpisodeOrderReverse(bool v) async {
+    await _settings.setEpisodeOrderReverse(v);
+    notifyListeners();
+  }
 }

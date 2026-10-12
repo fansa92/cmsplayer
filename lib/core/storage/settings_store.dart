@@ -98,6 +98,13 @@ class SettingsStore {
     await _prefs?.setBool(K.prefMultiSourceSearch, v);
   }
 
+  /// 选集列表是否倒序显示（默认正序）。
+  bool get episodeOrderReverse => _prefs?.getBool(K.prefEpisodeOrder) ?? false;
+
+  Future<void> setEpisodeOrderReverse(bool v) async {
+    await _prefs?.setBool(K.prefEpisodeOrder, v);
+  }
+
   // ---------------- 同步 ----------------
   //
   // WebDAV 密码按明文存在应用配置里。这个应用不联网上送任何用户数据，

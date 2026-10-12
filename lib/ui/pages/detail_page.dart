@@ -8,6 +8,7 @@ import '../../data/models/play_task.dart';
 import '../../data/models/vod_item.dart';
 import '../../data/models/vod_source.dart';
 import '../../data/repository/vod_repository.dart';
+import '../../state/app_state.dart';
 import '../../state/favorites_store.dart';
 import '../../state/history_store.dart';
 import '../actions.dart';
@@ -396,6 +397,11 @@ class _DetailPageState extends State<DetailPage> {
     final int lineIdx = _lineIndex.clamp(0, lines.length - 1);
     final PlayLine line = lines[lineIdx];
     final bool resumeOnThisLine = record != null && record.lineIndex == lineIdx;
+    final bool reverse =
+        context.watch<AppState>().episodeOrderReverse;
+    final List<int> order = reverse
+        ? <int>[for (int i = line.episodes.length - 1; i >= 0; i--) i]
+        : <int>[for (int i = 0; i < line.episodes.length; i++) i];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -432,6 +438,14 @@ class _DetailPageState extends State<DetailPage> {
             const Spacer(),
             if (line.episodes.length > 1)
               TextButton.icon(
+                icon: const Icon(Icons.swap_vert, size: 18),
+                label: Text(reverse ? '反序' : '正序'),
+                onPressed: () => context
+                    .read<AppState>()
+                    .setEpisodeOrderReverse(!reverse),
+              ),
+            if (line.episodes.length > 1)
+              TextButton.icon(
                 icon: const Icon(Icons.play_circle_outline, size: 18),
                 label: const Text('从头播放'),
                 onPressed: () => _play(lineIdx, 0),
@@ -443,7 +457,7 @@ class _DetailPageState extends State<DetailPage> {
           spacing: 8,
           runSpacing: 8,
           children: <Widget>[
-            for (int i = 0; i < line.episodes.length; i++)
+            for (final int i in order)
               _EpisodeButton(
                 name: line.episodes[i].name,
                 selected: resumeOnThisLine && record.episodeIndex == i,

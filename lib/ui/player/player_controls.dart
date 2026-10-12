@@ -748,69 +748,92 @@ class _PlayerControlsState extends State<PlayerControls> {
   Future<void> _showEpisodeSheet(BuildContext context) async {
     final List<PlayLine> lines = controller.task.item.playLines;
     if (lines.isEmpty) return;
+    int lineIdx = controller.task.lineIndex.clamp(0, lines.length - 1);
 
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (BuildContext ctx) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(ctx).height * 0.65,
-          ),
-          child: ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.only(bottom: 16),
-            children: <Widget>[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: Text(
-                  controller.task.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
+      builder: (BuildContext ctx) => StatefulBuilder(
+        builder: (BuildContext ctx, void Function(void Function()) setSheet) {
+          final PlayLine line = lines[lineIdx];
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(ctx).height * 0.65,
               ),
-              for (int li = 0; li < lines.length; li++) ...<Widget>[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 4),
-                  child: Text(
-                    lines[li].name,
-                    style: Theme.of(ctx).textTheme.labelLarge?.copyWith(
-                          color: Theme.of(ctx).colorScheme.primary,
-                        ),
+              child: ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.only(bottom: 16),
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                    child: Text(
+                      controller.task.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: <Widget>[
-                      for (int ei = 0;
-                          ei < lines[li].episodes.length;
-                          ei++)
-                        ActionChip(
-                          label: Text(lines[li].episodes[ei].name),
-                          avatar: (li == controller.task.lineIndex &&
-                                  ei == controller.task.episodeIndex)
-                              ? const Icon(Icons.play_arrow, size: 16)
-                              : null,
-                          onPressed: () {
-                            Navigator.of(ctx).pop();
-                            controller.selectEpisode(li, ei);
-                            _show();
-                          },
-                        ),
-                    ],
+                  // 线路横排放一行，选中线路的选集列在下面。
+                  if (lines.length > 1)
+                    SizedBox(
+                      height: 40,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: lines.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (BuildContext c, int li) {
+                          final bool selected = li == lineIdx;
+                          return ChoiceChip(
+                            label: Text(
+                              '${lines[li].name} (${lines[li].episodes.length})',
+                            ),
+                            selected: selected,
+                            onSelected: (_) => setSheet(() => lineIdx = li),
+                          );
+                        },
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+                    child: Text(
+                      line.name,
+                      style: Theme.of(ctx).textTheme.labelLarge?.copyWith(
+                            color: Theme.of(ctx).colorScheme.primary,
+                          ),
+                    ),
                   ),
-                ),
-              ],
-            ],
-          ),
-        ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        for (int ei = 0; ei < line.episodes.length; ei++)
+                          ActionChip(
+                            label: Text(line.episodes[ei].name),
+                            avatar: (lineIdx == controller.task.lineIndex &&
+                                    ei == controller.task.episodeIndex)
+                                ? const Icon(Icons.play_arrow, size: 16)
+                                : null,
+                            onPressed: () {
+                              Navigator.of(ctx).pop();
+                              controller.selectEpisode(lineIdx, ei);
+                              _show();
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
