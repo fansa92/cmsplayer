@@ -4,7 +4,7 @@ class K {
 
   static const String appName = 'CMSPlayer';
   static const String appNameCn = 'CMS 播放器';
-  static const String appVersion = '1.0.0';
+  static const String appVersion = '1.0.2';
 
   // ---------------- 网络 ----------------
   static const Duration connectTimeout = Duration(seconds: 10);
