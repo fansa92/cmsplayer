@@ -8,6 +8,7 @@ import '../../data/models/vod_source.dart';
 import '../../state/browse_store.dart';
 import '../../state/search_store.dart';
 import '../../state/source_store.dart';
+import '../navigation.dart';
 import '../pages/category_page.dart';
 import '../pages/favorites_page.dart';
 import '../pages/history_page.dart';
@@ -139,6 +140,11 @@ class _AppShellState extends State<AppShell> {
             titleSpacing: useRail ? 16 : 12,
             title: SourceSwitcher(source: active),
             actions: <Widget>[
+              IconButton(
+                tooltip: '榜单',
+                icon: const Icon(Icons.leaderboard_outlined),
+                onPressed: () => AppRoutes.openRank(context),
+              ),
               if (PlatformInfo.isDesktop)
                 IconButton(
                   tooltip: '键盘快捷键 (?)',

@@ -1,17 +1,29 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants.dart';
+import '../../core/errors.dart';
 import '../../core/storage/app_dirs.dart';
 import '../../core/utils/formatter.dart';
 import '../../core/utils/responsive.dart';
+import '../../data/api/update_checker.dart';
+import '../../data/models/favorite_item.dart';
+import '../../data/models/play_record.dart';
+import '../../data/models/vod_source.dart';
+import '../../data/repository/record_repository.dart';
+import '../../data/sync/backup_bundle.dart';
+import '../../data/sync/sync_tombstones.dart';
 import '../../state/app_state.dart';
 import '../../state/favorites_store.dart';
 import '../../state/history_store.dart';
 import '../../state/source_store.dart';
 import '../../state/sync_store.dart';
 import '../actions.dart';
+import '../widgets/backup_prompt.dart';
 import '../widgets/hint_paragraph.dart';
+import '../widgets/update_prompt.dart';
 import 'sync_page.dart';
 
 /// 设置页。
@@ -25,6 +37,15 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   int? _cacheBytes;
 
+  /// 检查更新中（按钮换成转圈，避免连点打出一串请求）。
+  bool _checkingUpdate = false;
+
+  /// 上次检查的结果，找到更新时挂在副标题上，没找到就什么都不显示。
+  UpdateInfo? _latest;
+
+  /// 正在导出备份。
+  bool _exporting = false;
+
   @override
   void initState() {
     super.initState();
@@ -34,6 +55,74 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _refreshCacheSize() async {
     final int size = await AppDirs.imageCacheSize();
     if (mounted) setState(() => _cacheBytes = size);
+  }
+
+  /// 导出完整备份。
+  ///
+  /// 数据直接取内存里的 store，不再读一遍磁盘：这几个 store 在启动时已经
+  /// 加载完毕，用户看到的就是它们的内容，备份理应和界面上一致。
+  Future<void> _exportBackup() async {
+    if (_exporting) return;
+    setState(() => _exporting = true);
+    try {
+      // 先把内存里的数据取下来（同步读），再做两次异步读取：
+      // 中间隔着 await，之后就不该再碰 context 了。
+      final List<PlayRecord> history = context.read<HistoryStore>().records;
+      final List<FavoriteItem> favorites =
+          context.read<FavoritesStore>().items;
+      final List<VodSource> sources = context.read<SourceStore>().sources;
+      final Map<String, Object?> settings =
+          context.read<AppState>().settings.exportSnapshot();
+      final List<String> searches =
+          await RecordRepository.loadSearchKeywords();
+      final Map<String, Map<String, int>> tombstones =
+          await SyncTombstones.instance.load();
+
+      final BackupBundle bundle = BackupBundle(
+        exportedAt: DateTime.now(),
+        appVersion: K.appVersion,
+        history: history,
+        favorites: favorites,
+        sources: sources,
+        searches: searches,
+        settings: settings,
+        tombstones: tombstones,
+      );
+      final File file = await BackupExporter.write(bundle);
+      if (!mounted) return;
+      await showBackupResult(context, file: file, bundle: bundle);
+    } on Object catch (e) {
+      if (mounted) AppActions.snackError(context, e);
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  /// 检查更新。
+  ///
+  /// 这里不做「静默自动检查」：这个应用打开就会去请求资源站，再叠一个启动
+  /// 请求既慢又容易误报（GitHub 在部分网络下要几十秒才超时）。
+  Future<void> _checkUpdate() async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    try {
+      final UpdateInfo? info = await UpdateChecker.instance.latest();
+      if (!mounted) return;
+      setState(() => _latest = info);
+      if (info == null || !info.isNewer) {
+        AppActions.snack(context, '已是最新版本 ${K.appVersion}');
+        return;
+      }
+      await showUpdatePrompt(context, info);
+    } on VodException catch (e) {
+      // 更新检查的失败原因基本都是「网络不通 / 服务返回异常」，
+      // 直接把 message 给用户，比套一层「操作失败」更有用。
+      if (mounted) AppActions.snack(context, e.message);
+    } on Object catch (e) {
+      if (mounted) AppActions.snackError(context, e);
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
   }
 
   @override
@@ -139,6 +228,21 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           ListTile(
+            leading: const Icon(Icons.save_alt),
+            title: const Text('导出完整备份'),
+            subtitle: const Text(
+              '播放记录、收藏、资源站、搜索词与设置，写成单个 JSON 文件',
+            ),
+            trailing: _exporting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : null,
+            onTap: _exporting ? null : _exportBackup,
+          ),
+          ListTile(
             leading: const Icon(Icons.history_toggle_off_outlined),
             title: const Text('清空观看记录'),
             onTap: () => _confirm(
@@ -164,6 +268,21 @@ class _SettingsPageState extends State<SettingsPage> {
             title: const Text('版本'),
             subtitle: Text('${K.appVersion} · ${PlatformInfo.label}'),
           ),
+          ListTile(
+            leading: const Icon(Icons.system_update_alt),
+            title: const Text('检查更新'),
+            subtitle: Text(_updateSubtitle),
+            trailing: _checkingUpdate
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : TextButton(
+                    onPressed: _checkUpdate,
+                    child: const Text('检查'),
+                  ),
+          ),
           const HintParagraph(
             '本应用本身不内置、不提供、不分发任何影片内容，'
             '仅作为一个 macCMS（苹果CMS）VOD 接口的播放器，'
@@ -174,6 +293,15 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+  }
+
+  /// 检查更新那一行的副标题。
+  String get _updateSubtitle {
+    if (_checkingUpdate) return '正在查询最新发行版…';
+    final UpdateInfo? info = _latest;
+    if (info == null) return '从 GitHub 发行版页获取最新版本';
+    if (!info.isNewer) return '已是最新版本';
+    return '有新版本 ${info.version} 可下载';
   }
 
   /// 同步入口的副标题。

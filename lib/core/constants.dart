@@ -6,6 +6,19 @@ class K {
   static const String appNameCn = 'CMS 播放器';
   static const String appVersion = '1.0.2';
 
+  // ---------------- 更新检查 ----------------
+  /// 仓库地址。应用内更新检查直接打 GitHub 的公开 API，不需要 token。
+  static const String repoOwner = 'fansa92';
+  static const String repoName = 'cmsplayer';
+
+  /// 最新发行版接口。
+  static const String releaseLatestApi =
+      'https://api.github.com/repos/$repoOwner/$repoName/releases/latest';
+
+  /// 发行版列表页（API 不可用时给用户一个可手动打开的地址）。
+  static const String releasesPage =
+      'https://github.com/$repoOwner/$repoName/releases';
+
   // ---------------- 网络 ----------------
   static const Duration connectTimeout = Duration(seconds: 10);
   static const Duration requestTimeout = Duration(seconds: 20);

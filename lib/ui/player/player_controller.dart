@@ -204,6 +204,75 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   @override
   String? get fallbackNotice => _fallbackNotice;
 
+  // ---------------------------------------------------------------- 手动换源
+
+  /// 手动换源的候选缓存：源 id → 跨源定位结果。
+  ///
+  /// 弹层只把 id 传回来，这里再取回完整的线路 / 集下标，避免让 UI 层持有
+  /// [SourceFallback] 这种带整部影片详情的对象。
+  final Map<String, SourceFallback> _alternates =
+      <String, SourceFallback>{};
+
+  @override
+  bool get canSwitchSource =>
+      _sources.enabledSources.any((VodSource s) => s.id != _task.source.id);
+
+  /// 在其它已启用的资源站里找同一部片子的同一集。
+  ///
+  /// 复用自动降级的跨源搜索：匹配条件（片名 + 年代 + 同名集）已经收得很紧，
+  /// 手动换源同样不能把用户带到另一部片子上。
+  @override
+  Future<List<PlayerSourceOption>> findAlternateSources() async {
+    _alternates.clear();
+    final List<VodSource> candidates = _sources.enabledSources
+        .where((VodSource s) => s.id != _task.source.id)
+        .toList();
+    if (candidates.isEmpty) return const <PlayerSourceOption>[];
+
+    final List<SourceFallback> found =
+        await FallbackResolver.crossSource(_task, candidates);
+    if (_disposed) return const <PlayerSourceOption>[];
+
+    final List<PlayerSourceOption> options = <PlayerSourceOption>[];
+    for (final SourceFallback target in found) {
+      _alternates[target.source.id] = target;
+      options.add(PlayerSourceOption(
+        id: target.source.id,
+        label: target.label,
+        episodeLabel: _episodeLabel(target),
+      ));
+    }
+    return options;
+  }
+
+  /// 候选里的集说明：`线路名 · 第 01 集`。
+  static String _episodeLabel(SourceFallback target) {
+    final PlayLine? line = target.item.playLines.length > target.lineIndex
+        ? target.item.playLines[target.lineIndex]
+        : null;
+    if (line == null) return '';
+    final String name = target.episodeIndex < line.episodes.length
+        ? line.episodes[target.episodeIndex].name.trim()
+        : '';
+    if (name.isEmpty) return line.name;
+    return '${line.name} · $name';
+  }
+
+  /// 手动切到某个候选源。打开失败时照常走降级链，不会卡在一个黑屏上。
+  @override
+  Future<void> switchToSource(String sourceId) async {
+    final SourceFallback? target = _alternates[sourceId];
+    if (target == null) return;
+    if (target.source.id == _task.source.id) return;
+    // 手动换源不计入自动降级的次数上限：那是对"自动乱切"的限制。
+    _crossSourceCount = 0;
+    _triedSourceIds.clear();
+    final bool opened = await _applyFallback(target);
+    if (!opened) {
+      await _handleFailure('无法打开视频（${target.label}）');
+    }
+  }
+
   // ---------------------------------------------------------------- 状态
 
   @override

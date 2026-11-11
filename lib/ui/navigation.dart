@@ -4,6 +4,7 @@ import '../data/models/play_task.dart';
 import '../data/models/vod_item.dart';
 import '../data/models/vod_source.dart';
 import 'pages/detail_page.dart';
+import 'pages/rank_page.dart';
 import 'pages/source_page.dart';
 import 'player/player_page.dart';
 
@@ -43,6 +44,12 @@ class AppRoutes {
       MaterialPageRoute<void>(
         builder: (_) => SourcePage(asHome: asHome),
       ),
+    );
+  }
+
+  static Future<void> openRank(BuildContext context) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const RankPage()),
     );
   }
 }

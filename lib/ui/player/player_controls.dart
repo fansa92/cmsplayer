@@ -611,6 +611,18 @@ class _PlayerControlsState extends State<PlayerControls> {
                             _scheduleHide();
                           },
                         ),
+                        if (controller.canSwitchSource) ...<Widget>[
+                          const SizedBox(width: 8),
+                          PlayerPillButton(
+                            label: '换源',
+                            icon: Icons.swap_horiz,
+                            tooltip: '到其它资源站里找同一集',
+                            onTap: () {
+                              _openSourceSheet();
+                              _scheduleHide();
+                            },
+                          ),
+                        ],
                         // 清晰度：纯信息，不做成按钮，点它不如点顶栏的"视频信息"。
                         if (controller.resolutionLabel != null) ...<Widget>[
                           const SizedBox(width: 8),
@@ -705,6 +717,10 @@ class _PlayerControlsState extends State<PlayerControls> {
 
   void _openSkipSheet() {
     showSkipSheet(context, controller);
+  }
+
+  void _openSourceSheet() {
+    showSourceSheet(context, controller);
   }
 
   Widget _buildGestureIndicator(BuildContext context) {

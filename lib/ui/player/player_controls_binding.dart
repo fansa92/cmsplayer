@@ -23,6 +23,28 @@ class PlayerAudioTrack {
   final String codec;
 }
 
+/// 一条可手动切换的跨源候选。
+///
+/// 与音轨同理，这里只暴露界面要用的三个字段，把 [SourceFallback] 那套
+/// 定位信息留在状态层，弹层不需要知道线路下标是怎么算出来的。
+@immutable
+class PlayerSourceOption {
+  const PlayerSourceOption({
+    required this.id,
+    required this.label,
+    this.episodeLabel = '',
+  });
+
+  /// 资源站 id，切换时原样回传。
+  final String id;
+
+  /// 资源站名称。
+  final String label;
+
+  /// 匹配到的集（含线路名），用于说明「换过去是第几集」。
+  final String episodeLabel;
+}
+
 /// [PlayerControls] 对播放器状态层的依赖面。
 ///
 /// 控制层本身只关心「读状态 + 发命令」，不需要知道底下是 media_kit 还是别的
@@ -68,6 +90,18 @@ abstract class PlayerControlsBinding implements Listenable {
 
   /// 当前音轨 id，未知时为 null。
   String? get audioId;
+
+  // ---------------------------------------------------------------- 换源
+  /// 是否还有别的已启用资源站可换。只有一个源时控制层不显示入口。
+  bool get canSwitchSource;
+
+  /// 在其它资源站里找同一部片子的同一集。
+  ///
+  /// 可能比较慢（每站一次搜索），所以由弹层自己接住加载态。
+  Future<List<PlayerSourceOption>> findAlternateSources();
+
+  /// 切换到 [findAlternateSources] 返回的某个候选。
+  Future<void> switchToSource(String sourceId);
 
   // ---------------------------------------------------------------- 定时关闭
   /// 定时关闭的剩余时长，没开定时为 null。

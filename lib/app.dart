@@ -8,6 +8,7 @@ import 'state/app_state.dart';
 import 'state/browse_store.dart';
 import 'state/favorites_store.dart';
 import 'state/history_store.dart';
+import 'state/rank_store.dart';
 import 'state/search_store.dart';
 import 'state/source_store.dart';
 import 'state/sync_store.dart';
@@ -30,6 +31,10 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
   late final SearchStore _searchStore = SearchStore();
   late final FavoritesStore _favoritesStore = FavoritesStore();
   late final HistoryStore _historyStore = HistoryStore();
+
+  /// 榜单页是独立 push 的路由，但状态放在这里：来回进出不重复拉取，
+  /// 排序选择也能保留。
+  late final RankStore _rankStore = RankStore();
 
   /// 同步。依赖上面三个 Store —— [SyncStore] 的构造参数就是它们。
   ///
@@ -66,6 +71,7 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
     _favoritesStore.dispose();
     _historyStore.dispose();
     _syncStore.dispose();
+    _rankStore.dispose();
     super.dispose();
   }
 
@@ -80,6 +86,7 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
         ChangeNotifierProvider<FavoritesStore>.value(value: _favoritesStore),
         ChangeNotifierProvider<HistoryStore>.value(value: _historyStore),
         ChangeNotifierProvider<SyncStore>.value(value: _syncStore),
+        ChangeNotifierProvider<RankStore>.value(value: _rankStore),
       ],
       child: Consumer<AppState>(
         builder: (BuildContext context, AppState app, _) {

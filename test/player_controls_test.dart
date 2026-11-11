@@ -417,6 +417,58 @@ void main() {
     });
   });
 
+  group('换源', () {
+    testWidgets('只有一个资源站时不显示换源入口', (WidgetTester tester) async {
+      setSize(tester);
+      binding.canSwitchSource = false;
+      await mount(tester);
+      expect(find.text('换源'), findsNothing);
+      await unmount(tester);
+    });
+
+    testWidgets('弹层列出候选，选中后回传源 id', (WidgetTester tester) async {
+      setSize(tester);
+      binding.canSwitchSource = true;
+      binding.sourceOptions = const <PlayerSourceOption>[
+        PlayerSourceOption(
+          id: 's2',
+          label: '备用站',
+          episodeLabel: 'm3u8 · 第01集',
+        ),
+      ];
+      await mount(tester);
+
+      await tester.tap(find.text('换源'));
+      await tester.pumpAndSettle();
+
+      expect(binding.calls, contains('findAlternateSources'));
+      expect(find.text('切换资源站'), findsOneWidget);
+      expect(find.text('备用站'), findsOneWidget);
+      expect(find.text('m3u8 · 第01集'), findsOneWidget);
+
+      await tester.tap(find.text('备用站'));
+      await tester.pumpAndSettle();
+      expect(binding.calls, contains('switchToSource:s2'));
+      expect(find.text('切换资源站'), findsNothing);
+
+      await unmount(tester);
+    });
+
+    testWidgets('没有候选时给出说明，不显示空列表', (WidgetTester tester) async {
+      setSize(tester);
+      binding.canSwitchSource = true;
+      await mount(tester);
+
+      await tester.tap(find.text('换源'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('其它资源站里没找到这部片子'), findsOneWidget);
+      expect(find.text('重新查找'), findsOneWidget);
+
+      await unmount(tester);
+    });
+  });
+
   group('控制栏按钮与错误态', () {
     testWidgets('倍速药丸打开弹层并把选择回传给状态层', (WidgetTester tester) async {
       setSize(tester);
@@ -570,6 +622,12 @@ class FakeBinding extends ChangeNotifier implements PlayerControlsBinding {
   String? audioId;
 
   @override
+  bool canSwitchSource = false;
+
+  /// findAlternateSources 的返回值，用例里按需塞候选。
+  List<PlayerSourceOption> sourceOptions = const <PlayerSourceOption>[];
+
+  @override
   Duration? sleepRemaining;
 
   @override
@@ -633,6 +691,16 @@ class FakeBinding extends ChangeNotifier implements PlayerControlsBinding {
   @override
   Future<void> selectAudioTrack(String id) async =>
       calls.add('selectAudioTrack:$id');
+
+  @override
+  Future<List<PlayerSourceOption>> findAlternateSources() async {
+    calls.add('findAlternateSources');
+    return sourceOptions;
+  }
+
+  @override
+  Future<void> switchToSource(String sourceId) async =>
+      calls.add('switchToSource:$sourceId');
 
   @override
   Future<void> setSleepTimer(Duration? remaining) async =>

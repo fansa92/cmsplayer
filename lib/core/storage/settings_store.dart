@@ -181,4 +181,23 @@ class SettingsStore {
 
   /// 设置是否真的落盘成功（用于"设置已保存"的提示）。
   bool get persisted => _ok;
+
+  /// 备份用的一份设置快照。
+  ///
+  /// 刻意只收「用户偏好」这一类：WebDAV 地址、用户名、尤其是明文密码
+  /// 一律不导出 —— 备份文件经常被丢到网盘或聊天窗口里，带上凭据等于泄露。
+  Map<String, Object?> exportSnapshot() => <String, Object?>{
+        'themeMode': themeMode.name,
+        'activeSourceId': activeSourceId,
+        'defaultRate': defaultRate,
+        'autoNextEpisode': autoNextEpisode,
+        'resumePlayback': resumePlayback,
+        'keepScreenOn': keepScreenOn,
+        'showControlsOnStart': showControlsOnStart,
+        'hardwareDecode': hardwareDecode,
+        'multiSourceSearch': multiSourceSearch,
+        'episodeOrderReverse': episodeOrderReverse,
+        'autoSkipIntro': autoSkipIntro,
+        'autoSkipOutro': autoSkipOutro,
+      };
 }

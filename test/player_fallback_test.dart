@@ -12,6 +12,7 @@ import 'package:cms_player/state/app_state.dart';
 import 'package:cms_player/state/history_store.dart';
 import 'package:cms_player/state/source_store.dart';
 import 'package:cms_player/ui/player/player_controller.dart';
+import 'package:cms_player/ui/player/player_controls_binding.dart';
 
 import 'helpers/fake_player.dart';
 import 'helpers/fakes.dart';
@@ -378,6 +379,94 @@ void main() {
       await fail();
       expect(controller.task.source.name, '备用站2');
       expect(rig.platform.opens.last, 'https://c.com/1.m3u8');
+    });
+  });
+
+  group('手动换源', () {
+    test('只有一个启用的源时没有换源入口，也不发请求', () async {
+      final FakeHttpClient client = crossClient();
+      useFakeApi(client);
+      await mount();
+
+      expect(controller.canSwitchSource, isFalse);
+      expect(await controller.findAlternateSources(), isEmpty);
+      expect(client.requests, isEmpty);
+    });
+
+    test('查找其它源时按「片名 + 同集」给出候选', () async {
+      final FakeHttpClient client = crossClient();
+      useFakeApi(client);
+      await mount(
+        extraSources: <VodSource>[sourceOf('备用站', host: 'b.com')],
+      );
+
+      expect(controller.canSwitchSource, isTrue);
+      final List<PlayerSourceOption> options =
+          await controller.findAlternateSources();
+
+      expect(options, hasLength(1));
+      expect(options.single.id, isNotEmpty);
+      expect(options.single.label, '备用站');
+      expect(options.single.episodeLabel, 'm3u8 · 第01集');
+      expect(client.last.url.host, 'b.com');
+    });
+
+    test('切过去后任务与播放地址都换成新源', () async {
+      useFakeApi(crossClient());
+      await mount(
+        extraSources: <VodSource>[sourceOf('备用站', host: 'b.com')],
+      );
+      final List<PlayerSourceOption> options =
+          await controller.findAlternateSources();
+
+      await controller.switchToSource(options.single.id);
+      await rig.settle(16);
+
+      expect(controller.task.source.name, '备用站');
+      expect(rig.platform.opens.last, 'https://b.com/1.m3u8');
+      expect(controller.error, isNull);
+      expect(controller.fallbackNotice, contains('备用站'));
+    });
+
+    test('未知的源 id 直接忽略，不打断当前播放', () async {
+      useFakeApi(crossClient());
+      await mount(
+        extraSources: <VodSource>[sourceOf('备用站', host: 'b.com')],
+      );
+      final int before = rig.platform.opens.length;
+
+      await controller.switchToSource('不存在的源');
+      await rig.settle(16);
+
+      expect(rig.platform.opens, hasLength(before));
+      expect(controller.task.source.name, '主站');
+    });
+
+    test('手动换源不计入自动降级的次数上限', () async {
+      useFakeApi(crossClient());
+      await mount(
+        extraSources: <VodSource>[
+          sourceOf('备用站1', host: 'b.com'),
+          sourceOf('备用站2', host: 'c.com'),
+        ],
+      );
+
+      // 先用自动降级把次数用满（上限 2 次，这里只走 1 次）。
+      await fail();
+      await fail();
+      await fail();
+      expect(controller.task.source.name, '备用站1');
+
+      // 手动再换一次：不重置的话下面的自动降级会立刻拒绝。
+      final List<PlayerSourceOption> options =
+          await controller.findAlternateSources();
+      expect(options, isNotEmpty);
+      await controller.switchToSource(options.first.id);
+      await rig.settle(16);
+
+      expect(controller.task.source.name, '备用站2');
+      expect(rig.platform.opens.last, 'https://c.com/1.m3u8');
+      expect(controller.error, isNull);
     });
   });
 }

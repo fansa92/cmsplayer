@@ -435,6 +435,137 @@ Future<void> showSleepSheet(
   await controller.setSleepTimer(result.duration);
 }
 
+/// 手动换源。
+///
+/// 查找要逐站搜索，慢的时候能拖十几秒，所以弹层自己接住加载态：先出标题，
+/// 列表位置放一行「正在查找」，找到后原地换成候选列表。
+Future<void> showSourceSheet(
+  BuildContext context,
+  PlayerControlsBinding controller,
+) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (BuildContext ctx) => SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(ctx).height * 0.6,
+        ),
+        child: _SourceSheetBody(controller: controller),
+      ),
+    ),
+  );
+}
+
+class _SourceSheetBody extends StatefulWidget {
+  const _SourceSheetBody({required this.controller});
+
+  final PlayerControlsBinding controller;
+
+  @override
+  State<_SourceSheetBody> createState() => _SourceSheetBodyState();
+}
+
+class _SourceSheetBodyState extends State<_SourceSheetBody> {
+  late Future<List<PlayerSourceOption>> _future = _load();
+
+  Future<List<PlayerSourceOption>> _load() =>
+      widget.controller.findAlternateSources();
+
+  void _retry() => setState(() => _future = _load());
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return FutureBuilder<List<PlayerSourceOption>>(
+      future: _future,
+      builder: (BuildContext ctx, AsyncSnapshot<List<PlayerSourceOption>> snap) {
+        final bool loading = snap.connectionState != ConnectionState.done;
+        final List<PlayerSourceOption> options =
+            snap.data ?? const <PlayerSourceOption>[];
+
+        return ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.only(bottom: 12),
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+              child: Text(
+                '切换资源站',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(
+                '在其它已启用的资源站里找同一部片子的同一集',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            if (loading)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 8, 20, 16),
+                child: Row(
+                  children: <Widget>[
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 12),
+                    Text('正在其它资源站里查找…'),
+                  ],
+                ),
+              )
+            else if (snap.hasError)
+              ListTile(
+                leading: Icon(
+                  Icons.error_outline,
+                  color: theme.colorScheme.error,
+                ),
+                title: const Text('查找失败'),
+                subtitle: Text('${snap.error}'),
+                trailing: TextButton(
+                  onPressed: _retry,
+                  child: const Text('重试'),
+                ),
+              )
+            else if (options.isEmpty)
+              ListTile(
+                leading: const Icon(Icons.search_off),
+                title: const Text('其它资源站里没找到这部片子'),
+                subtitle: const Text('片名、年代或集名对不上时不会列出来，避免播错内容'),
+                trailing: TextButton(
+                  onPressed: _retry,
+                  child: const Text('重新查找'),
+                ),
+              )
+            else
+              for (final PlayerSourceOption option in options)
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.swap_horiz, size: 20),
+                  title: Text(option.label),
+                  subtitle: option.episodeLabel.isEmpty
+                      ? null
+                      : Text(option.episodeLabel),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    widget.controller.switchToSource(option.id);
+                  },
+                ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 /// 片头片尾标记。
 ///
 /// 「设为当前」取的是**点下去那一刻**的进度，所以按钮在弹层里点、画面还在
