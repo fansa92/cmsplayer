@@ -43,6 +43,12 @@ class _PlayerControlsState extends State<PlayerControls> {
   String? _osd;
   Timer? _osdTimer;
 
+  /// 双击落点，用来判断点的是左 / 中 / 右哪个区域。
+  Offset? _doubleTapPos;
+
+  /// 是否正处于长按临时提速。
+  bool _bursting = false;
+
   PlayerControlsBinding get controller => widget.controller;
 
   @override
@@ -127,6 +133,39 @@ class _PlayerControlsState extends State<PlayerControls> {
   }
 
   // ---------------------------------------------------------------- 手势
+
+  /// 双击分区：左右各 1/3 快退 / 快进，中间切播放。
+  ///
+  /// 竖屏下手持手机时拇指落在中间偏下，中间留给「暂停」最符合直觉；
+  /// 想快进则要明确点到两侧，避免误触。
+  void _onDoubleTap() {
+    final double width = MediaQuery.sizeOf(context).width;
+    if (width <= 0) return;
+    final double dx = _doubleTapPos?.dx ?? width / 2;
+    if (dx < width / 3) {
+      controller.seekBy(-K.doubleTapStep);
+      _showOsd('快退 ${K.doubleTapStep.inSeconds} 秒');
+    } else if (dx > width * 2 / 3) {
+      controller.seekBy(K.doubleTapStep);
+      _showOsd('快进 ${K.doubleTapStep.inSeconds} 秒');
+    } else {
+      controller.togglePlay();
+    }
+    _show();
+  }
+
+  Future<void> _onLongPressStart(LongPressStartDetails details) async {
+    await controller.startBurstRate();
+    if (!mounted) return;
+    setState(() => _bursting = true);
+  }
+
+  Future<void> _onLongPressEnd(LongPressEndDetails details) async {
+    await controller.endBurstRate();
+    if (!mounted) return;
+    setState(() => _bursting = false);
+    _show();
+  }
 
   void _onHorizontalDragStart(DragStartDetails details) {
     controller.startSeek();
@@ -309,12 +348,11 @@ class _PlayerControlsState extends State<PlayerControls> {
                 _focusNode.requestFocus();
                 _toggle();
               },
-              onDoubleTap: locked
-                  ? null
-                  : () {
-                      controller.togglePlay();
-                      _show();
-                    },
+              onDoubleTapDown:
+                  locked ? null : (d) => _doubleTapPos = d.localPosition,
+              onDoubleTap: locked ? null : _onDoubleTap,
+              onLongPressStart: locked ? null : _onLongPressStart,
+              onLongPressEnd: locked ? null : _onLongPressEnd,
               onHorizontalDragStart: locked ? null : _onHorizontalDragStart,
               onHorizontalDragUpdate: locked ? null : _onHorizontalDragUpdate,
               onHorizontalDragEnd: locked ? null : _onHorizontalDragEnd,
@@ -394,6 +432,44 @@ class _PlayerControlsState extends State<PlayerControls> {
                 ),
               ),
             ],
+            // 片头里才出现的「跳过片头」。不随控制栏一起隐藏 —— 控制栏一收，
+            // 这个入口就再也点不到了，而这恰恰是用户最想按的时候。
+            if (controller.inIntro)
+              Positioned(
+                right: 16,
+                bottom: ((_visible ? 96 : 20) +
+                    MediaQuery.paddingOf(context).bottom),
+                child: Material(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(20),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: () {
+                      controller.skipIntro();
+                      _show();
+                    },
+                    child: const Padding(
+                      padding:
+                          EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Text(
+                            '跳过片头',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          SizedBox(width: 4),
+                          Icon(Icons.skip_next, size: 18, color: Colors.white),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             _buildGestureIndicator(context),
           ],
         );
@@ -477,27 +553,74 @@ class _PlayerControlsState extends State<PlayerControls> {
             ),
             Row(
               children: <Widget>[
-                PlayerPillButton(
-                  label: '${controller.rate}x',
-                  onTap: () {
-                    _openRateSheet();
-                    _scheduleHide();
-                  },
+                // 窄屏（竖屏手机）放不下这么多个药丸，让它们横向滚动，
+                // 而不是把上一集 / 下一集挤出去。
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: <Widget>[
+                        PlayerPillButton(
+                          label: '${controller.rate}x',
+                          onTap: () {
+                            _openRateSheet();
+                            _scheduleHide();
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        PlayerPillButton(
+                          label: controller.fitLabel,
+                          onTap: () {
+                            controller.cycleFit();
+                            _scheduleHide();
+                          },
+                        ),
+                        if (controller.audioTracks.length > 1) ...<Widget>[
+                          const SizedBox(width: 8),
+                          PlayerPillButton(
+                            label: '音轨',
+                            icon: Icons.audiotrack,
+                            tooltip: '切换音轨',
+                            onTap: () {
+                              _openTrackSheet();
+                              _scheduleHide();
+                            },
+                          ),
+                        ],
+                        const SizedBox(width: 8),
+                        PlayerPillButton(
+                          label: _sleepLabel,
+                          icon: Icons.bedtime_outlined,
+                          active: controller.sleepRemaining != null ||
+                              controller.sleepAtEnd,
+                          tooltip: '定时关闭',
+                          onTap: () {
+                            _openSleepSheet();
+                            _scheduleHide();
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        PlayerPillButton(
+                          label: '片头尾',
+                          icon: Icons.content_cut,
+                          active:
+                              controller.introMs > 0 || controller.outroMs > 0,
+                          tooltip: '片头片尾标记',
+                          onTap: () {
+                            _openSkipSheet();
+                            _scheduleHide();
+                          },
+                        ),
+                        // 清晰度：纯信息，不做成按钮，点它不如点顶栏的"视频信息"。
+                        if (controller.resolutionLabel != null) ...<Widget>[
+                          const SizedBox(width: 8),
+                          PlayerInfoChip(label: controller.resolutionLabel!),
+                        ],
+                        const SizedBox(width: 4),
+                      ],
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 8),
-                PlayerPillButton(
-                  label: controller.fitLabel,
-                  onTap: () {
-                    controller.cycleFit();
-                    _scheduleHide();
-                  },
-                ),
-                // 清晰度：纯信息，不做成按钮，点它不如点顶栏的"视频信息"。
-                if (controller.resolutionLabel != null) ...<Widget>[
-                  const SizedBox(width: 8),
-                  PlayerInfoChip(label: controller.resolutionLabel!),
-                ],
-                const Spacer(),
                 if (controller.task.hasPrev)
                   IconButton(
                     tooltip: '上一集',
@@ -527,6 +650,14 @@ class _PlayerControlsState extends State<PlayerControls> {
   }
 
   // ---------------------------------------------------------------- 弹层
+
+  /// 定时药丸上显示的文字：开着倒计时就显示剩余，否则是「本集结束 / 定时」。
+  String get _sleepLabel {
+    final Duration? left = controller.sleepRemaining;
+    if (left != null) return formatDurationShort(left);
+    if (controller.sleepAtEnd) return '本集结束';
+    return '定时';
+  }
 
   void _openRateSheet() {
     showRateSheet(
@@ -562,6 +693,18 @@ class _PlayerControlsState extends State<PlayerControls> {
       audioChannels: controller.audioChannels,
       audioSampleRate: controller.audioSampleRate,
     );
+  }
+
+  void _openTrackSheet() {
+    showTrackSheet(context, controller);
+  }
+
+  void _openSleepSheet() {
+    showSleepSheet(context, controller);
+  }
+
+  void _openSkipSheet() {
+    showSkipSheet(context, controller);
   }
 
   Widget _buildGestureIndicator(BuildContext context) {
@@ -621,6 +764,29 @@ class _PlayerControlsState extends State<PlayerControls> {
               Text(
                 '${(ratio * 100).round()}%',
                 style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // 长按临时提速：一直显示到松手，不用 OSD 的 1.4 秒自动消失。
+    if (_bursting) {
+      return const Center(
+        child: PlayerGlassBox(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(Icons.fast_forward, color: Colors.white, size: 20),
+              SizedBox(width: 6),
+              Text(
+                '${K.burstRate}x 快放中',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),

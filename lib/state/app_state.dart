@@ -75,4 +75,19 @@ class AppState extends ChangeNotifier {
     await _settings.setEpisodeOrderReverse(v);
     notifyListeners();
   }
+
+  // ---------------- 片头片尾 ----------------
+  bool get autoSkipIntro => _settings.autoSkipIntro;
+
+  Future<void> setAutoSkipIntro(bool v) async {
+    await _settings.setAutoSkipIntro(v);
+    notifyListeners();
+  }
+
+  bool get autoSkipOutro => _settings.autoSkipOutro;
+
+  Future<void> setAutoSkipOutro(bool v) async {
+    await _settings.setAutoSkipOutro(v);
+    notifyListeners();
+  }
 }

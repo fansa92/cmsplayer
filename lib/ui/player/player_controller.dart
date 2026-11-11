@@ -138,6 +138,39 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   DateTime _lastHistoryWrite = DateTime.fromMillisecondsSinceEpoch(0);
   bool _resumeApplied = false;
 
+  // ---------------------------------------------------------------- 音轨
+
+  /// 可切换的音轨（已剔除 media_kit 的 auto / no 占位轨）。
+  List<PlayerAudioTrack> _audioTracks = const <PlayerAudioTrack>[];
+
+  /// id → 原始轨，切换时要用它调 `setAudioTrack`。
+  final Map<String, AudioTrack> _audioById = <String, AudioTrack>{};
+
+  String? _audioId;
+
+  /// 长按临时倍速前的倍速，null 表示当前没有处于临时提速。
+  double? _burstFrom;
+
+  // ---------------------------------------------------------------- 定时关闭
+
+  /// 定时关闭的到点时刻。null 表示没开。
+  DateTime? _sleepAt;
+
+  /// 倒计时用的每秒一跳的定时器（每跳重新挂下一个）。
+  Timer? _sleepTick;
+
+  /// 「本集播完再关」。
+  bool _sleepAtEnd = false;
+
+  // ---------------------------------------------------------------- 片头片尾
+
+  int _introMs = 0;
+  int _outroMs = 0;
+
+  /// 本集是否已经处理过片头 / 片尾（避免反复 seek 或反复跳集）。
+  bool _introHandled = false;
+  bool _outroHandled = false;
+
   // ---------------------------------------------------------------- 降级
 
   /// 同源降级链：备用地址 + 其它线路里的同一集。
@@ -261,6 +294,40 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     return fps.toStringAsFixed(3).replaceFirst(RegExp(r'\.?0+$'), '');
   }
 
+  // -------------------------------------------------- 音轨 / 定时 / 片头片尾
+
+  @override
+  List<PlayerAudioTrack> get audioTracks => _audioTracks;
+
+  @override
+  String? get audioId => _audioId;
+
+  @override
+  Duration? get sleepRemaining {
+    final DateTime? at = _sleepAt;
+    if (at == null) return null;
+    final Duration left = at.difference(environment.now());
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  @override
+  bool get sleepAtEnd => _sleepAtEnd;
+
+  @override
+  int get introMs => _introMs;
+
+  @override
+  int get outroMs => _outroMs;
+
+  @override
+  bool get inIntro => _introMs > 0 && _position.inMilliseconds < _introMs;
+
+  @override
+  bool get autoSkipIntro => _app.autoSkipIntro;
+
+  @override
+  bool get autoSkipOutro => _app.autoSkipOutro;
+
   void _emit() {
     if (_disposed) return;
     notifyListeners();
@@ -301,7 +368,9 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   void _bindStreams() {
     _subs.add(_player.stream.position.listen((Duration p) {
       _position = p;
-      _maybeAutoResume();
+      // 续播优先于片头：续播已经把人带到很远的地方时，不该再回头跳片头。
+      if (!_maybeAutoResume()) _maybeSkipIntro();
+      _maybeSkipOutro();
       _maybeWriteHistory();
       _emit();
     }));
@@ -356,14 +425,25 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     // codec 等属性，正常播放时它一直是空的 VideoTrack('auto', null, null)，
     // 结果就是面板里编码 / 音频格式那几行永远不显示。
     _subs.add(_player.stream.tracks.listen((Tracks ts) {
+      final List<AudioTrack> audio = _realAudioTracks(ts.audio);
       final VideoTrack? v = _firstRealVideo(ts.video);
-      final AudioTrack? a = _firstRealAudio(ts.audio);
+      final AudioTrack? a = audio.isEmpty ? null : audio.first;
       _videoFps = v?.fps ?? _videoFps;
       _videoCodec = v?.codec ?? _videoCodec;
       _videoDecoder = v?.decoder ?? _videoDecoder;
       _audioCodec = a?.codec ?? _audioCodec;
       _audioChannels = a?.channels ?? _channelsOf(a) ?? _audioChannels;
       _audioSampleRate = a?.samplerate ?? _audioSampleRate;
+      _syncAudioTracks(audio);
+      _emit();
+    }));
+    // 当前生效的轨。用户切换音轨、或者播放器自己挑了一条之后都会推一次，
+    // 用它保持「弹层里打勾的那条」和实际播放的一致。
+    _subs.add(_player.stream.track.listen((Track t) {
+      final AudioTrack a = t.audio;
+      if (a.id == 'auto' || a.id == 'no') return;
+      if (_audioId == a.id) return;
+      _audioId = a.id;
       _emit();
     }));
     _subs.add(_player.stream.videoParams.listen((VideoParams p) {
@@ -392,12 +472,40 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     return null;
   }
 
-  static AudioTrack? _firstRealAudio(List<AudioTrack> list) {
-    for (final AudioTrack t in list) {
-      if (t.id == 'auto' || t.id == 'no') continue;
-      if (t.codec != null && t.codec!.isNotEmpty) return t;
-    }
-    return null;
+  /// 真正可用于切换的音轨。
+  ///
+  /// 和 [_firstRealVideo] 不同，这里不要求带 codec —— 用户能切就行；只是
+  /// 占位的 `auto` / `no` 必须剔掉，否则弹层里会多出两个假选项。
+  static List<AudioTrack> _realAudioTracks(List<AudioTrack> list) => list
+      .where((AudioTrack t) => t.id != 'auto' && t.id != 'no')
+      .toList(growable: false);
+
+  /// 音轨显示名：优先用容器里的标题，其次语言，都没有就按序号。
+  static String _audioLabel(AudioTrack t, int index) {
+    final String title = (t.title ?? '').trim();
+    if (title.isNotEmpty) return title;
+    final String lang = (t.language ?? '').trim();
+    if (lang.isNotEmpty) return lang;
+    return '音轨 ${index + 1}';
+  }
+
+  void _syncAudioTracks(List<AudioTrack> audio) {
+    _audioById
+      ..clear()
+      ..addEntries(
+        audio.map((AudioTrack t) => MapEntry<String, AudioTrack>(t.id, t)),
+      );
+    _audioTracks = <PlayerAudioTrack>[
+      for (int i = 0; i < audio.length; i++)
+        PlayerAudioTrack(
+          id: audio[i].id,
+          label: _audioLabel(audio[i], i),
+          codec: audio[i].codec ?? '',
+        ),
+    ];
+    // 选中的那条可能随着切集消失了，落回第一条真实轨。
+    if (_audioId != null && !_audioById.containsKey(_audioId)) _audioId = null;
+    _audioId ??= audio.isEmpty ? null : audio.first.id;
   }
 
   /// 声道数兜底：demux-channels 缺失时用 demux-channel-count 拼一个可读串。
@@ -434,6 +542,7 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   Future<void> _openCurrent() async {
     _fallbackChain = FallbackResolver.sameSource(_task);
     _fallbackIndex = -1;
+    _loadSkipMarks();
 
     final PlayEpisode? episode = _task.episode;
     if (episode == null) {
@@ -466,6 +575,8 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     _startupTimer = null;
     _completed = false;
     _resumeApplied = false;
+    _introHandled = false;
+    _outroHandled = false;
     _position = Duration.zero;
     _duration = Duration.zero;
     _resetStreamInfo();
@@ -601,32 +712,78 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   }
 
   /// 首次拿到时长时应用续播位置。
-  void _maybeAutoResume() {
-    if (_resumeApplied || _disposed) return;
+  ///
+  /// 返回是否真的跳转过 —— 调用方据此决定还要不要走「跳过片头」，否则两个
+  /// seek 会打架，最后生效的反而是片头那个。
+  bool _maybeAutoResume() {
+    if (_resumeApplied || _disposed) return false;
     if (!_app.resumePlayback) {
       _resumeApplied = true;
-      return;
+      return false;
     }
-    if (_duration.inMilliseconds <= 0) return;
+    if (_duration.inMilliseconds <= 0) return false;
     _resumeApplied = true;
 
     final PlayRecord? record = _history.byKey(_task.recordKey);
-    if (record == null) return;
+    if (record == null) return false;
     if (record.lineIndex != _task.lineIndex ||
         record.episodeIndex != _task.episodeIndex) {
-      return;
+      return false;
     }
     final int pos = record.positionMs;
-    if (pos <= K.resumeSeekThreshold.inMilliseconds) return;
+    if (pos <= K.resumeSeekThreshold.inMilliseconds) return false;
     if (record.durationMs > 0 && pos / record.durationMs >= K.finishRatio) {
-      return;
+      return false;
     }
     _player.seek(Duration(milliseconds: pos));
     AppLog.d('Player', 'resume at ${pos}ms');
+    return true;
+  }
+
+  /// 开播后跳过一次片头。只做一次，用户自己拖回片头不会被反复弹出去。
+  void _maybeSkipIntro() {
+    if (_introHandled || _disposed) return;
+    if (_introMs <= 0 || !_app.autoSkipIntro) {
+      _introHandled = true;
+      return;
+    }
+    // 等时长落地：没有时长时 position 还不可信，跳过去也可能被 mpv 忽略。
+    if (_duration.inMilliseconds <= 0) return;
+    if (!_resumeApplied) return;
+    _introHandled = true;
+    if (_position.inMilliseconds >= _introMs) return;
+    unawaited(_player.seek(Duration(milliseconds: _introMs)));
+    _setNotice('已跳过片头');
+  }
+
+  /// 播到片尾标记时直接进下一集。
+  void _maybeSkipOutro() {
+    if (_outroHandled || _disposed) return;
+    if (_outroMs <= 0 || !_app.autoSkipOutro || !_task.hasNext) {
+      _outroHandled = true;
+      return;
+    }
+    if (_position.inMilliseconds < _outroMs) return;
+    _outroHandled = true;
+    _setNotice('已跳过片尾');
+    unawaited(next());
+  }
+
+  void _loadSkipMarks() {
+    final PlayRecord? r = _history.byKey(_task.recordKey);
+    _introMs = r?.introMs ?? 0;
+    _outroMs = r?.outroMs ?? 0;
   }
 
   void _onCompleted() {
     _writeHistory(force: true, finished: true);
+    // 「本集播完关」优先于自动连播：用户要的是停下来，不是继续放。
+    if (_sleepAtEnd) {
+      _sleepAtEnd = false;
+      _setNotice('本集已播完，定时关闭');
+      _emit();
+      return;
+    }
     if (_app.autoNextEpisode && _task.hasNext) {
       next();
     }
@@ -729,6 +886,159 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     _fallbackNotice = null;
     _fallbackTrying = null;
     await _openCurrent();
+  }
+
+  // ---------------------------------------------------------------- 音轨
+
+  @override
+  Future<void> selectAudioTrack(String id) async {
+    final AudioTrack? track = _audioById[id];
+    if (track == null || _audioId == id) return;
+    _audioId = id;
+    _emit();
+    try {
+      await _player.setAudioTrack(track);
+    } on Object catch (e) {
+      AppLog.e('Player', 'setAudioTrack failed: $e');
+    }
+  }
+
+  /// 长按临时提速。松手由 [endBurstRate] 还原。
+  ///
+  /// 只在当前倍速低于目标倍速时才生效：用户本来就用 3 倍速看着，长按反而
+  /// 降速到 2 倍会很怪。
+  @override
+  Future<void> startBurstRate() async {
+    if (_burstFrom != null) return;
+    if (_rate >= K.burstRate) return;
+    _burstFrom = _rate;
+    _emit();
+    try {
+      await _player.setRate(K.burstRate);
+    } on Object catch (e) {
+      AppLog.e('Player', 'burst rate failed: $e');
+    }
+  }
+
+  @override
+  Future<void> endBurstRate() async {
+    final double? from = _burstFrom;
+    if (from == null) return;
+    _burstFrom = null;
+    _emit();
+    try {
+      await _player.setRate(from);
+    } on Object catch (e) {
+      AppLog.e('Player', 'restore rate failed: $e');
+    }
+  }
+
+  // ---------------------------------------------------------------- 定时关闭
+
+  @override
+  Future<void> setSleepTimer(Duration? remaining) async {
+    _sleepTick?.cancel();
+    _sleepTick = null;
+    _sleepAtEnd = false;
+    if (remaining == null || remaining <= Duration.zero) {
+      _sleepAt = null;
+      _emit();
+      return;
+    }
+    _sleepAt = environment.now().add(remaining);
+    _scheduleSleepTick();
+    _emit();
+  }
+
+  @override
+  Future<void> setSleepAtEnd(bool value) async {
+    _sleepTick?.cancel();
+    _sleepTick = null;
+    _sleepAt = null;
+    _sleepAtEnd = value;
+    _emit();
+  }
+
+  /// 每秒一跳，只为把剩余时间推给界面；每一跳再挂下一跳。
+  void _scheduleSleepTick() {
+    _sleepTick = environment.createTimer(const Duration(seconds: 1), () {
+      if (_disposed) return;
+      final Duration? left = sleepRemaining;
+      if (left == null) return;
+      if (left <= Duration.zero) {
+        _sleepTick = null;
+        _sleepAt = null;
+        unawaited(_player.pause());
+        _setNotice('定时关闭已生效，已暂停播放');
+        _emit();
+        return;
+      }
+      _emit();
+      _scheduleSleepTick();
+    });
+  }
+
+  // ---------------------------------------------------------------- 片头片尾
+
+  @override
+  Future<void> markIntroAt(Duration position) async {
+    _introMs = position.inMilliseconds;
+    // 片头标到了片尾之后，说明有一个标错了，清掉旧的片尾。
+    if (_outroMs > 0 && _outroMs <= _introMs) _outroMs = 0;
+    _introHandled = true;
+    await _persistSkipMarks();
+    _emit();
+  }
+
+  @override
+  Future<void> markOutroAt(Duration position) async {
+    _outroMs = position.inMilliseconds;
+    if (_introMs > 0 && _outroMs <= _introMs) _introMs = 0;
+    _outroHandled = false;
+    await _persistSkipMarks();
+    _emit();
+  }
+
+  @override
+  Future<void> clearSkipMarks() async {
+    _introMs = 0;
+    _outroMs = 0;
+    await _persistSkipMarks();
+    _emit();
+  }
+
+  @override
+  Future<void> skipIntro() async {
+    if (_introMs <= 0) return;
+    _introHandled = true;
+    await seek(Duration(milliseconds: _introMs));
+  }
+
+  @override
+  Future<void> setAutoSkipIntro(bool value) async {
+    await _app.setAutoSkipIntro(value);
+    // 打开开关时重置：正卡在片头里也要能立刻跳过去。
+    if (value) _introHandled = false;
+    _emit();
+  }
+
+  @override
+  Future<void> setAutoSkipOutro(bool value) async {
+    await _app.setAutoSkipOutro(value);
+    if (value) _outroHandled = false;
+    _emit();
+  }
+
+  Future<void> _persistSkipMarks() async {
+    final PlayRecord? existing = _history.byKey(_task.recordKey);
+    if (existing != null) {
+      await _history.upsert(
+        existing.copyWith(introMs: _introMs, outroMs: _outroMs),
+      );
+      return;
+    }
+    // 还没播够 20 秒、历史里根本没有这条记录：补写一条，带上标记。
+    _writeHistory(force: true);
   }
 
   // ---------------------------------------------------------------- 手势
@@ -869,6 +1179,8 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
         durationMs: durationMs,
         finished: finished ||
             (durationMs > 0 && positionMs / durationMs >= K.finishRatio),
+        introMs: _introMs,
+        outroMs: _outroMs,
         updatedAt: environment.now(),
       ),
     );
@@ -895,6 +1207,8 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     _startupTimer = null;
     _noticeTimer?.cancel();
     _noticeTimer = null;
+    _sleepTick?.cancel();
+    _sleepTick = null;
     for (final StreamSubscription<Object?> sub in _subs) {
       unawaited(sub.cancel());
     }

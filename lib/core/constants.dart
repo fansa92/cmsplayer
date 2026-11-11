@@ -54,6 +54,15 @@ class K {
   /// 播放记录写盘节流间隔。
   static const Duration historyThrottle = Duration(seconds: 8);
 
+  /// 双击画面左右区域时快进 / 快退的步长。
+  static const Duration doubleTapStep = Duration(seconds: 10);
+
+  /// 长按画面时的临时倍速。
+  static const double burstRate = 2.0;
+
+  /// 定时关闭的可选时长（分钟）。
+  static const List<int> sleepMinutes = <int>[15, 30, 45, 60];
+
   // ---------------- 播放降级 ----------------
 
   /// 播放失败时最多跨源切换几次。
@@ -82,6 +91,8 @@ class K {
   static const String prefShowControlsOnStart = 'show_controls_on_start';
   static const String prefHardwareDecode = 'hardware_decode';
   static const String prefEpisodeOrder = 'episode_order';
+  static const String prefAutoSkipIntro = 'auto_skip_intro';
+  static const String prefAutoSkipOutro = 'auto_skip_outro';
   static const String prefImageCacheBytes = 'image_cache_bytes';
 
   // ---------------- 同步 ----------------

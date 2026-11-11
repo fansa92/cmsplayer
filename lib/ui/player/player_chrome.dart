@@ -303,34 +303,59 @@ class PlayerErrorPanel extends StatelessWidget {
   }
 }
 
-/// 玻璃质感的小药丸按钮（倍速、画面比例）。
+/// 玻璃质感的小药丸按钮（倍速、画面比例、音轨、定时）。
+///
+/// [icon] 非空时在文字前带一个小图标；[active] 用于「已经生效」的状态
+/// （例如定时关闭已开），靠提高不透明度区分，不换颜色 —— 播放器里所有控件
+/// 都是白字，突然蹦出一个彩色按钮会很跳。
 class PlayerPillButton extends StatelessWidget {
-  const PlayerPillButton({super.key, required this.label, required this.onTap});
+  const PlayerPillButton({
+    super.key,
+    required this.label,
+    required this.onTap,
+    this.icon,
+    this.active = false,
+    this.tooltip,
+  });
 
   final String label;
   final VoidCallback onTap;
+  final IconData? icon;
+  final bool active;
+  final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    final Widget pill = InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.white24,
+          color: active ? Colors.white38 : Colors.white24,
           borderRadius: BorderRadius.circular(16),
         ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (icon != null) ...<Widget>[
+              Icon(icon, size: 14, color: Colors.white),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
       ),
     );
+    if (tooltip == null) return pill;
+    return Tooltip(message: tooltip!, child: pill);
   }
 }
 

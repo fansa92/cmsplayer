@@ -49,7 +49,9 @@ class FakePlatformPlayer extends PlatformPlayer {
   final List<String> opens = <String>[];
   final List<Duration> seeks = <Duration>[];
   final List<double> rates = <double>[];
+  final List<String> audioTrackIds = <String>[];
   int playOrPauseCalls = 0;
+  int pauseCalls = 0;
   bool disposed = false;
 
   /// 让第 [openFailureAt] 次 open 抛异常（1 起算），用来测「打开即失败」。
@@ -62,6 +64,16 @@ class FakePlatformPlayer extends PlatformPlayer {
     if (openFailureAt == opens.length) {
       throw StateError('open failed: $uri');
     }
+  }
+
+  @override
+  Future<void> setAudioTrack(AudioTrack track) async {
+    audioTrackIds.add(track.id);
+  }
+
+  @override
+  Future<void> pause() async {
+    pauseCalls++;
   }
 
   @override
@@ -100,6 +112,7 @@ class FakePlatformPlayer extends PlatformPlayer {
   void emitWidth(int? v) => widthController.add(v);
   void emitHeight(int? v) => heightController.add(v);
   void emitTracks(Tracks v) => tracksController.add(v);
+  void emitTrack(Track v) => trackController.add(v);
   void emitVideoParams(VideoParams v) => videoParamsController.add(v);
   void emitAudioParams(AudioParams v) => audioParamsController.add(v);
 }
@@ -176,6 +189,22 @@ class FakePlayerRig {
     await settle(4);
     platform.emitPosition(position);
     await settle(4);
+  }
+
+  /// 等某个条件成立。
+  ///
+  /// `HistoryStore.upsert` 是「先落盘再 notify」，而真实磁盘写入不是微任务：
+  /// 全量测试并发跑的时候，固定等 20ms 有时等不到写入完成，断言就会看到
+  /// 「还没写过」的假象。这里轮询到条件成立为止，最多 2 秒。
+  Future<void> waitUntil(
+    bool Function() condition, {
+    int tries = 400,
+    Duration step = const Duration(milliseconds: 5),
+  }) async {
+    for (int i = 0; i < tries; i++) {
+      if (condition()) return;
+      await Future<void>.delayed(step);
+    }
   }
 
   /// 触发所有尚未取消的定时器。

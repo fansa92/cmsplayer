@@ -18,6 +18,8 @@ class PlayRecord {
     this.positionMs = 0,
     this.durationMs = 0,
     this.finished = false,
+    this.introMs = 0,
+    this.outroMs = 0,
     required this.updatedAt,
   });
 
@@ -36,7 +38,20 @@ class PlayRecord {
   final int positionMs;
   final int durationMs;
   final bool finished;
+
+  /// 片头结束点：从 0 播到这里之间的内容算片头。0 表示没标记。
+  ///
+  /// 和续播进度存在同一条记录里 —— 它天然是「这部片子」的属性，跟着记录
+  /// 一起同步、一起删除，省掉一套独立的存储和墓碑。
+  final int introMs;
+
+  /// 片尾开始点：播到这里之后的字幕 / 预告算片尾。0 表示没标记。
+  final int outroMs;
+
   final DateTime updatedAt;
+
+  /// 是否标记过片头 / 片尾。
+  bool get hasSkipMarks => introMs > 0 || outroMs > 0;
 
   factory PlayRecord.fromJson(Map<String, dynamic> json) {
     final String sourceId = strOf(json['sourceId']);
@@ -56,6 +71,8 @@ class PlayRecord {
       positionMs: intOf(json['positionMs']),
       durationMs: intOf(json['durationMs']),
       finished: json['finished'] == true,
+      introMs: intOf(json['introMs']),
+      outroMs: intOf(json['outroMs']),
       updatedAt: DateTime.tryParse(strOf(json['updatedAt'])) ?? DateTime.now(),
     );
   }
@@ -75,6 +92,8 @@ class PlayRecord {
         'positionMs': positionMs,
         'durationMs': durationMs,
         'finished': finished,
+        'introMs': introMs,
+        'outroMs': outroMs,
         'updatedAt': updatedAt.toIso8601String(),
       };
 
@@ -105,6 +124,8 @@ class PlayRecord {
     int? positionMs,
     int? durationMs,
     bool? finished,
+    int? introMs,
+    int? outroMs,
     DateTime? updatedAt,
   }) =>
       PlayRecord(
@@ -122,6 +143,8 @@ class PlayRecord {
         positionMs: positionMs ?? this.positionMs,
         durationMs: durationMs ?? this.durationMs,
         finished: finished ?? this.finished,
+        introMs: introMs ?? this.introMs,
+        outroMs: outroMs ?? this.outroMs,
         updatedAt: updatedAt ?? this.updatedAt,
       );
 }

@@ -76,6 +76,20 @@ class _SettingsPageState extends State<SettingsPage> {
             onChanged: (bool v) => app.setResumePlayback(v),
           ),
           SwitchListTile(
+            secondary: const Icon(Icons.content_cut),
+            title: const Text('自动跳过片头'),
+            subtitle: const Text('在播放器里标记过片头的影片生效'),
+            value: app.autoSkipIntro,
+            onChanged: (bool v) => app.setAutoSkipIntro(v),
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.fast_forward_outlined),
+            title: const Text('自动跳过片尾'),
+            subtitle: const Text('播到片尾标记直接进入下一集'),
+            value: app.autoSkipOutro,
+            onChanged: (bool v) => app.setAutoSkipOutro(v),
+          ),
+          SwitchListTile(
             secondary: const Icon(Icons.lightbulb_outline),
             title: const Text('播放时保持屏幕常亮'),
             value: app.keepScreenOn,

@@ -105,6 +105,20 @@ class SettingsStore {
     await _prefs?.setBool(K.prefEpisodeOrder, v);
   }
 
+  /// 开播时自动跳过已标记的片头。
+  bool get autoSkipIntro => _prefs?.getBool(K.prefAutoSkipIntro) ?? true;
+
+  Future<void> setAutoSkipIntro(bool v) async {
+    await _prefs?.setBool(K.prefAutoSkipIntro, v);
+  }
+
+  /// 播到已标记的片尾时直接进入下一集。
+  bool get autoSkipOutro => _prefs?.getBool(K.prefAutoSkipOutro) ?? true;
+
+  Future<void> setAutoSkipOutro(bool v) async {
+    await _prefs?.setBool(K.prefAutoSkipOutro, v);
+  }
+
   // ---------------- 同步 ----------------
   //
   // WebDAV 密码按明文存在应用配置里。这个应用不联网上送任何用户数据，

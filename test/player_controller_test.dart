@@ -13,6 +13,7 @@ import 'package:cms_player/state/app_state.dart';
 import 'package:cms_player/state/history_store.dart';
 import 'package:cms_player/state/source_store.dart';
 import 'package:cms_player/ui/player/player_controller.dart';
+import 'package:cms_player/ui/player/player_controls_binding.dart';
 
 import 'helpers/fake_player.dart';
 import 'helpers/fakes.dart';
@@ -79,32 +80,45 @@ void main() {
             ],
       );
 
+  /// 造一条历史记录。
+  ///
+  /// 注意：不能读 [task] —— 这个函数在 `mount(records: ...)` 的实参位置求值，
+  /// 那时 [task] 还是上一轮（单独跑某个用例时则是未初始化）的值。
+  /// 这里按默认源的 id 拼 key，正好等于 [mount] 里建出来的 `recordKey`。
   PlayRecord record({
     int lineIndex = 0,
     int episodeIndex = 0,
     int positionMs = 30000,
     int durationMs = 120000,
-  }) =>
-      PlayRecord(
-        key: task.recordKey,
-        sourceId: task.source.id,
-        sourceName: task.source.name,
-        vodId: '${task.item.id}',
-        vodName: task.item.name,
-        lineIndex: lineIndex,
-        episodeIndex: episodeIndex,
-        lineName: 'm3u8',
-        episodeName: '第01集',
-        positionMs: positionMs,
-        durationMs: durationMs,
-        updatedAt: DateTime(2026, 1, 1),
-      );
+    int introMs = 0,
+    int outroMs = 0,
+  }) {
+    final VodSource s = source();
+    return PlayRecord(
+      key: '${s.id}|7',
+      sourceId: s.id,
+      sourceName: s.name,
+      vodId: '7',
+      vodName: '测试影片',
+      lineIndex: lineIndex,
+      episodeIndex: episodeIndex,
+      lineName: 'm3u8',
+      episodeName: '第01集',
+      positionMs: positionMs,
+      durationMs: durationMs,
+      introMs: introMs,
+      outroMs: outroMs,
+      updatedAt: DateTime(2026, 1, 1),
+    );
+  }
 
   Future<void> mount({
     VodSource? src,
     VodItem? vod,
     bool autoNext = true,
     bool resume = true,
+    bool autoSkipIntro = true,
+    bool autoSkipOutro = true,
     double defaultRate = 1.0,
     List<PlayRecord> records = const <PlayRecord>[],
     List<VodSource> extraSources = const <VodSource>[],
@@ -117,6 +131,8 @@ void main() {
     await settings.setAutoNextEpisode(autoNext);
     await settings.setResumePlayback(resume);
     await settings.setDefaultRate(defaultRate);
+    await settings.setAutoSkipIntro(autoSkipIntro);
+    await settings.setAutoSkipOutro(autoSkipOutro);
 
     app = AppState(settings);
     history = HistoryStore();
@@ -621,6 +637,7 @@ void main() {
       await rig.emitProgress(
           const Duration(seconds: 120), const Duration(seconds: 1));
       await rig.settle();
+      await rig.waitUntil(() => historyWrites >= 1);
       expect(historyWrites, 1);
       expect(history.byKey(task.recordKey)!.positionMs, 1000);
 
@@ -633,6 +650,7 @@ void main() {
       rig.clock = rig.clock.add(K.historyThrottle + const Duration(seconds: 1));
       rig.platform.emitPosition(const Duration(seconds: 30));
       await rig.settle();
+      await rig.waitUntil(() => historyWrites >= 2);
       expect(historyWrites, 2);
       expect(history.byKey(task.recordKey)!.positionMs, 30000);
     });
@@ -643,6 +661,7 @@ void main() {
           const Duration(seconds: 100), const Duration(seconds: 96));
       await rig.settle();
 
+      await rig.waitUntil(() => history.byKey(task.recordKey) != null);
       final PlayRecord r = history.byKey(task.recordKey)!;
       expect(r.key, task.recordKey);
       expect(r.sourceId, task.source.id);
@@ -663,6 +682,7 @@ void main() {
       rig.platform.emitCompleted(true);
       await rig.settle();
 
+      await rig.waitUntil(() => history.byKey(task.recordKey) != null);
       final PlayRecord r = history.byKey(task.recordKey)!;
       expect(r.finished, isTrue);
       expect(r.positionMs, 100000);
@@ -674,9 +694,11 @@ void main() {
       await rig.emitProgress(
           const Duration(seconds: 100), const Duration(seconds: 5));
       await rig.settle();
+      await rig.waitUntil(() => historyWrites >= 1);
       expect(historyWrites, 1);
       controller.dispose();
       await rig.settle();
+      await rig.waitUntil(() => historyWrites >= 2);
       expect(historyWrites, 2);
       controller.dispose();
       await rig.settle();
@@ -772,6 +794,7 @@ void main() {
       // 切到下一集时 _openUrl 会把 completed 重置，但「已看完」这一条
       // 记录必须在切集之前就落盘。
       expect(controller.completed, isFalse);
+      await rig.waitUntil(() => history.byKey(task.recordKey) != null);
       expect(history.byKey(task.recordKey)!.finished, isTrue);
     });
 
@@ -792,6 +815,288 @@ void main() {
         'https://a.com/1.m3u8',
         'https://a.com/2.m3u8',
       ]);
+    });
+  });
+  // ------------------------------------------------------------ 音轨
+
+  group('音轨切换', () {
+    Tracks withAudio(List<AudioTrack> audio) => Tracks(
+          audio: <AudioTrack>[
+            const AudioTrack('auto', null, null),
+            const AudioTrack('no', null, null),
+            ...audio,
+          ],
+        );
+
+    test('剔除 auto / no 占位轨，默认选中第一条', () async {
+      await mount();
+      rig.platform.emitTracks(withAudio(const <AudioTrack>[
+        AudioTrack('1', '国语', 'chi', codec: 'aac'),
+        AudioTrack('2', '粤语', 'yue', codec: 'ac-3'),
+      ]));
+      await rig.settle();
+
+      expect(controller.audioTracks.map((PlayerAudioTrack t) => t.id),
+          <String>['1', '2']);
+      expect(controller.audioTracks.first.label, '国语');
+      expect(controller.audioTracks.first.codec, 'aac');
+      expect(controller.audioId, '1');
+    });
+
+    test('没有标题时用语言，再没有就用序号', () async {
+      await mount();
+      rig.platform.emitTracks(withAudio(const <AudioTrack>[
+        AudioTrack('1', null, 'chi'),
+        AudioTrack('2', null, null),
+      ]));
+      await rig.settle();
+
+      expect(controller.audioTracks.map((PlayerAudioTrack t) => t.label),
+          <String>['chi', '音轨 2']);
+    });
+
+    test('切换音轨下发到播放内核，重复选择不重复下发', () async {
+      await mount();
+      rig.platform.emitTracks(withAudio(const <AudioTrack>[
+        AudioTrack('1', '国语', 'chi', codec: 'aac'),
+        AudioTrack('2', '粤语', 'yue', codec: 'ac-3'),
+      ]));
+      await rig.settle();
+
+      await controller.selectAudioTrack('2');
+      expect(rig.platform.audioTrackIds, <String>['2']);
+      expect(controller.audioId, '2');
+
+      await controller.selectAudioTrack('2');
+      await controller.selectAudioTrack('不存在');
+      expect(rig.platform.audioTrackIds, <String>['2']);
+    });
+
+    test('只有占位轨时没有可切换的音轨', () async {
+      await mount();
+      rig.platform.emitTracks(withAudio(const <AudioTrack>[]));
+      await rig.settle();
+      expect(controller.audioTracks, isEmpty);
+      expect(controller.audioId, isNull);
+    });
+  });
+
+  // ------------------------------------------------------------ 定时关闭
+
+  group('定时关闭', () {
+    test('倒计时期间每秒更新，到点暂停并提示', () async {
+      await mount();
+      await controller.setSleepTimer(const Duration(minutes: 30));
+      expect(controller.sleepRemaining, const Duration(minutes: 30));
+      expect(controller.sleepAtEnd, isFalse);
+
+      rig.clock = rig.clock.add(const Duration(minutes: 29));
+      rig.fireTimersOf(const Duration(seconds: 1));
+      expect(controller.sleepRemaining, const Duration(minutes: 1));
+      expect(rig.platform.pauseCalls, 0);
+
+      rig.clock = rig.clock.add(const Duration(minutes: 1));
+      rig.fireTimersOf(const Duration(seconds: 1));
+      expect(rig.platform.pauseCalls, 1);
+      expect(controller.sleepRemaining, isNull);
+      expect(controller.fallbackNotice, contains('定时关闭'));
+    });
+
+    test('取消定时后不再触发', () async {
+      await mount();
+      await controller.setSleepTimer(const Duration(minutes: 15));
+      await controller.setSleepTimer(null);
+      expect(controller.sleepRemaining, isNull);
+
+      rig.clock = rig.clock.add(const Duration(hours: 1));
+      rig.fireTimersOf(const Duration(seconds: 1));
+      expect(rig.platform.pauseCalls, 0);
+    });
+
+    test('「本集播完」时不自动连播', () async {
+      await mount();
+      await controller.setSleepAtEnd(true);
+      expect(controller.sleepRemaining, isNull);
+
+      rig.platform.emitDuration(const Duration(seconds: 100));
+      await rig.settle();
+      rig.platform.emitCompleted(true);
+      await rig.settle();
+
+      expect(controller.task.episodeIndex, 0, reason: '不该自动切到下一集');
+      expect(controller.sleepAtEnd, isFalse, reason: '用掉一次就复位');
+      expect(controller.fallbackNotice, contains('本集已播完'));
+    });
+  });
+
+  // ------------------------------------------------------------ 片头片尾
+
+  group('片头片尾', () {
+    test('开播后自动跳到片头结束点', () async {
+      await mount(records: <PlayRecord>[
+        record(positionMs: 0, durationMs: 600000, introMs: 90000),
+      ]);
+      await rig.emitProgress(const Duration(seconds: 600), Duration.zero);
+
+      expect(rig.platform.seeks, <Duration>[const Duration(seconds: 90)]);
+      expect(controller.fallbackNotice, contains('已跳过片头'));
+    });
+
+    test('续播优先于片头，不会被拉回片头', () async {
+      await mount(records: <PlayRecord>[
+        record(positionMs: 300000, durationMs: 600000, introMs: 90000),
+      ]);
+      await rig.emitProgress(const Duration(seconds: 600), Duration.zero);
+
+      expect(rig.platform.seeks, <Duration>[const Duration(seconds: 300)]);
+    });
+
+    test('关掉自动跳片头后不 seek，但保留「在片头内」的标记', () async {
+      await mount(
+        autoSkipIntro: false,
+        records: <PlayRecord>[
+          record(positionMs: 0, durationMs: 600000, introMs: 90000),
+        ],
+      );
+      await rig.emitProgress(const Duration(seconds: 600), Duration.zero);
+
+      expect(rig.platform.seeks, isEmpty);
+      expect(controller.inIntro, isTrue);
+      expect(controller.introMs, 90000);
+    });
+
+    test('手动跳过片头只跳一次', () async {
+      await mount(
+        autoSkipIntro: false,
+        records: <PlayRecord>[
+          record(positionMs: 0, durationMs: 600000, introMs: 90000),
+        ],
+      );
+      await rig.emitProgress(const Duration(seconds: 600), Duration.zero);
+
+      await controller.skipIntro();
+      expect(rig.platform.seeks, <Duration>[const Duration(seconds: 90)]);
+
+      // 假内核只记录 seek、不会自己推进度，这里手动补一次跳转后的位置，
+      // 顺便验证「已经处理过片头」之后不会因为新位置再跳一次。
+      rig.platform.emitPosition(const Duration(seconds: 90));
+      await rig.settle();
+      expect(rig.platform.seeks, <Duration>[const Duration(seconds: 90)]);
+      expect(controller.inIntro, isFalse, reason: '位置已到片头之后');
+    });
+
+    test('播到片尾标记直接进下一集', () async {
+      await mount(records: <PlayRecord>[
+        record(positionMs: 0, durationMs: 600000, outroMs: 540000),
+      ]);
+      await rig.emitProgress(const Duration(seconds: 600), Duration.zero);
+      rig.platform.emitPosition(const Duration(seconds: 540));
+      await rig.settle(12);
+
+      expect(controller.task.episodeIndex, 1);
+      expect(rig.platform.opens.last, 'https://a.com/2.m3u8');
+      expect(controller.fallbackNotice, contains('已跳过片尾'));
+    });
+
+    test('最后一集不会因为片尾标记跳转', () async {
+      await mount(records: <PlayRecord>[
+        record(positionMs: 0, durationMs: 600000, outroMs: 540000),
+      ]);
+      await controller.selectEpisode(0, 1);
+      await rig.settle();
+      rig.platform.emitDuration(const Duration(seconds: 600));
+      await rig.settle();
+      rig.platform.emitPosition(const Duration(seconds: 540));
+      await rig.settle(12);
+
+      expect(controller.task.episodeIndex, 1);
+      expect(rig.platform.opens, hasLength(2), reason: '只开过两集，没有额外重开');
+    });
+
+    test('标记当前进度会落进历史记录，历史里没记录时补一条', () async {
+      await mount();
+      rig.platform.emitDuration(const Duration(seconds: 600));
+      await rig.settle();
+      expect(history.byKey(task.recordKey), isNull);
+
+      await controller.markIntroAt(const Duration(seconds: 90));
+      await rig.settle();
+
+      expect(controller.introMs, 90000);
+      await rig.waitUntil(() => history.byKey(task.recordKey) != null);
+      final PlayRecord? saved = history.byKey(task.recordKey);
+      expect(saved, isNotNull);
+      expect(saved!.introMs, 90000);
+      expect(saved.durationMs, 600000);
+    });
+
+    test('片尾标在片头之前时清掉片头', () async {
+      await mount();
+      rig.platform.emitDuration(const Duration(seconds: 600));
+      await rig.settle();
+
+      await controller.markIntroAt(const Duration(seconds: 90));
+      await controller.markOutroAt(const Duration(seconds: 60));
+
+      expect(controller.introMs, 0);
+      expect(controller.outroMs, 60000);
+    });
+
+    test('清除标记后不再跳过，历史里也归零', () async {
+      await mount(records: <PlayRecord>[
+        record(positionMs: 0, durationMs: 600000, introMs: 90000),
+      ]);
+      await controller.clearSkipMarks();
+      await rig.settle();
+
+      expect(controller.introMs, 0);
+      expect(controller.outroMs, 0);
+      await rig.waitUntil(() => history.byKey(task.recordKey) != null);
+      expect(history.byKey(task.recordKey)!.introMs, 0);
+
+      await rig.emitProgress(const Duration(seconds: 600), Duration.zero);
+      expect(rig.platform.seeks, isEmpty);
+    });
+
+    test('切集后重新读取该影片的标记', () async {
+      await mount(records: <PlayRecord>[
+        record(positionMs: 0, durationMs: 600000, introMs: 90000),
+      ]);
+      await controller.selectEpisode(0, 1);
+      await rig.settle();
+
+      expect(controller.introMs, 90000, reason: '标记属于影片，跨集沿用');
+      expect(controller.inIntro, isTrue);
+    });
+  });
+
+  // ------------------------------------------------------------ 长按倍速
+
+  group('长按临时倍速', () {
+    test('按下提速到 2 倍，松开恢复原倍速', () async {
+      await mount();
+      await controller.startBurstRate();
+      expect(rig.platform.rates.last, 2.0);
+
+      await controller.endBurstRate();
+      expect(rig.platform.rates.last, 1.0);
+    });
+
+    test('原本就快于 2 倍时长按不会降速', () async {
+      await mount();
+      await controller.setRate(3.0);
+      await controller.startBurstRate();
+      await controller.endBurstRate();
+
+      expect(rig.platform.rates.last, 3.0);
+    });
+
+    test('重复 start 只提速一次', () async {
+      await mount();
+      await controller.startBurstRate();
+      await controller.startBurstRate();
+      expect(rig.platform.rates.where((double r) => r == 2.0), hasLength(1));
+      await controller.endBurstRate();
     });
   });
 }

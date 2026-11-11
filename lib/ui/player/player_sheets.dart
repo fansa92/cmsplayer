@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants.dart';
+import '../../core/utils/formatter.dart';
 import '../../data/models/play_line.dart';
+import 'player_controls_binding.dart';
 
-/// 播放器的三个底部弹层：倍速、选集、视频信息。
+/// 播放器的底部弹层：倍速、选集、视频信息、音轨、定时关闭、片头片尾。
 ///
 /// 抽到这里是因为它们只读控制器状态 + 一个回调，和手势、自动隐藏无关。
-/// 三个弹层都显式限高：`showModalBottomSheet` 默认只给屏高 9/16，手机横屏
+/// 几个弹层都显式限高：`showModalBottomSheet` 默认只给屏高 9/16，手机横屏
 /// 时约 390px，选项多一点就放不下。
 
 /// 倍速选择。
@@ -273,6 +275,266 @@ Future<void> showInfoSheet(
                   ),
                 ),
           ],
+        ),
+      ),
+    ),
+  );
+}
+
+/// 音轨选择。
+///
+/// 只有一条音轨时控制层不会显示入口，所以这里不需要处理「只有一个选项」的
+/// 空转情况。
+Future<void> showTrackSheet(
+  BuildContext context,
+  PlayerControlsBinding controller,
+) async {
+  final String? picked = await showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (BuildContext ctx) => SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(ctx).height * 0.6,
+        ),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.only(bottom: 12),
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(
+                '音轨',
+                style: Theme.of(ctx)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ),
+            for (final PlayerAudioTrack t in controller.audioTracks)
+              ListTile(
+                dense: true,
+                leading: Icon(
+                  t.id == controller.audioId ? Icons.check : Icons.audiotrack,
+                  size: 20,
+                ),
+                title: Text(t.label),
+                subtitle: t.codec.isEmpty ? null : Text(describeCodec(t.codec)),
+                onTap: () => Navigator.of(ctx).pop(t.id),
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+  if (picked != null) await controller.selectAudioTrack(picked);
+}
+
+/// 定时关闭的选择结果。
+///
+/// 三种状态互斥，用一个值对象表达比用「Duration? + bool」两个返回值清爽。
+class SleepSelection {
+  const SleepSelection.timer(this.duration) : atEnd = false;
+  const SleepSelection.atEnd()
+      : duration = null,
+        atEnd = true;
+  const SleepSelection.off()
+      : duration = null,
+        atEnd = false;
+
+  final Duration? duration;
+  final bool atEnd;
+
+  bool get isOff => duration == null && !atEnd;
+}
+
+/// 定时关闭。选完立刻生效，不再回调确认。
+Future<void> showSleepSheet(
+  BuildContext context,
+  PlayerControlsBinding controller,
+) async {
+  final Duration? remaining = controller.sleepRemaining;
+  final bool atEnd = controller.sleepAtEnd;
+
+  final SleepSelection? result = await showModalBottomSheet<SleepSelection>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (BuildContext ctx) => SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(ctx).height * 0.6,
+        ),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.only(bottom: 12),
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+              child: Text(
+                '定时关闭',
+                style: Theme.of(ctx)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (remaining != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  '还剩 ${formatDurationShort(remaining)} 自动暂停',
+                  style: Theme.of(ctx).textTheme.bodySmall,
+                ),
+              ),
+            ListTile(
+              dense: true,
+              leading: Icon(
+                remaining == null && !atEnd ? Icons.check : Icons.timer_off,
+                size: 20,
+              ),
+              title: const Text('关闭定时'),
+              onTap: () => Navigator.of(ctx).pop(const SleepSelection.off()),
+            ),
+            for (final int minutes in K.sleepMinutes)
+              ListTile(
+                dense: true,
+                leading: Icon(
+                  remaining == Duration(minutes: minutes)
+                      ? Icons.check
+                      : Icons.timer_outlined,
+                  size: 20,
+                ),
+                title: Text('$minutes 分钟'),
+                onTap: () => Navigator.of(ctx).pop(
+                  SleepSelection.timer(Duration(minutes: minutes)),
+                ),
+              ),
+            ListTile(
+              dense: true,
+              leading: Icon(
+                atEnd ? Icons.check : Icons.playlist_play,
+                size: 20,
+              ),
+              title: const Text('本集播完'),
+              subtitle: const Text('播完当前集就停，不自动连播'),
+              onTap: () => Navigator.of(ctx).pop(const SleepSelection.atEnd()),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  if (result == null) return;
+  if (result.atEnd) {
+    await controller.setSleepAtEnd(true);
+    return;
+  }
+  await controller.setSleepTimer(result.duration);
+}
+
+/// 片头片尾标记。
+///
+/// 「设为当前」取的是**点下去那一刻**的进度，所以按钮在弹层里点、画面还在
+/// 后台继续播也能标得准（弹层不暂停播放）。
+Future<void> showSkipSheet(
+  BuildContext context,
+  PlayerControlsBinding controller,
+) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (BuildContext ctx) => SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(ctx).height * 0.7,
+        ),
+        child: ListenableBuilder(
+          listenable: controller,
+          builder: (BuildContext ctx, _) {
+            final String now = formatDurationShort(controller.position);
+            final String intro = controller.introMs > 0
+                ? formatDurationShort(
+                    Duration(milliseconds: controller.introMs),
+                  )
+                : '未标记';
+            final String outro = controller.outroMs > 0
+                ? formatDurationShort(
+                    Duration(milliseconds: controller.outroMs),
+                  )
+                : '未标记';
+
+            return ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.only(bottom: 12),
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                  child: Text(
+                    '片头片尾',
+                    style: Theme.of(ctx)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: Text(
+                    '当前进度 $now',
+                    style: Theme.of(ctx).textTheme.bodySmall,
+                  ),
+                ),
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.first_page, size: 20),
+                  title: const Text('片头结束'),
+                  subtitle: Text('播到 $intro 之前算片头'),
+                  trailing: TextButton(
+                    onPressed: () =>
+                        controller.markIntroAt(controller.position),
+                    child: const Text('设为当前'),
+                  ),
+                ),
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.last_page, size: 20),
+                  title: const Text('片尾开始'),
+                  subtitle: Text('播到 $outro 之后算片尾'),
+                  trailing: TextButton(
+                    onPressed: () =>
+                        controller.markOutroAt(controller.position),
+                    child: const Text('设为当前'),
+                  ),
+                ),
+                SwitchListTile(
+                  dense: true,
+                  secondary: const Icon(Icons.skip_next_outlined, size: 20),
+                  title: const Text('自动跳过片头'),
+                  value: controller.autoSkipIntro,
+                  onChanged: (bool v) => controller.setAutoSkipIntro(v),
+                ),
+                SwitchListTile(
+                  dense: true,
+                  secondary: const Icon(Icons.fast_forward_outlined, size: 20),
+                  title: const Text('自动跳过片尾'),
+                  subtitle: const Text('播到片尾直接进下一集'),
+                  value: controller.autoSkipOutro,
+                  onChanged: (bool v) => controller.setAutoSkipOutro(v),
+                ),
+                if (controller.introMs > 0 || controller.outroMs > 0)
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.clear, size: 20),
+                    title: const Text('清除标记'),
+                    onTap: () => controller.clearSkipMarks(),
+                  ),
+              ],
+            );
+          },
         ),
       ),
     ),

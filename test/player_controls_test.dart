@@ -217,13 +217,14 @@ void main() {
   });
 
   group('手势', () {
-    testWidgets('双击切换播放，单击只切控制栏', (WidgetTester tester) async {
+    testWidgets('双击中间切换播放，单击只切控制栏', (WidgetTester tester) async {
       setSize(tester);
       await mount(tester);
 
-      await tester.tapAt(const Offset(200, 150));
+      // 800 宽，中间区是 266..533；y 取 200 避开中央播放键。
+      await tester.tapAt(const Offset(400, 200));
       await tester.pump(const Duration(milliseconds: 50));
-      await tester.tapAt(const Offset(200, 150));
+      await tester.tapAt(const Offset(400, 200));
       await tester.pump(const Duration(milliseconds: 400));
 
       expect(
@@ -231,7 +232,48 @@ void main() {
         hasLength(1),
         reason: '双击只触发一次播放切换，单击被抑制',
       );
-      expect(binding.calls, isNot(contains('seek:')));
+      expect(binding.calls, isNot(contains('seekBy:-10000')));
+
+      await unmount(tester);
+    });
+
+    testWidgets('双击左侧快退、右侧快进，并弹 OSD', (WidgetTester tester) async {
+      setSize(tester);
+      await mount(tester);
+
+      await tester.tapAt(const Offset(100, 300));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tapAt(const Offset(100, 300));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(binding.calls, contains('seekBy:-10000'));
+      expect(find.text('快退 10 秒'), findsOneWidget);
+      expect(binding.calls, isNot(contains('togglePlay')));
+
+      await tester.tapAt(const Offset(700, 300));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tapAt(const Offset(700, 300));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(binding.calls, contains('seekBy:10000'));
+      expect(find.text('快进 10 秒'), findsOneWidget);
+      expect(binding.calls, isNot(contains('togglePlay')));
+
+      await unmount(tester);
+    });
+
+    testWidgets('长按临时 2 倍速，松手恢复', (WidgetTester tester) async {
+      setSize(tester);
+      await mount(tester);
+
+      // (400, 200)：中间偏上，避开中央播放键。
+      final TestGesture g = await tester.startGesture(const Offset(400, 200));
+      await tester.pump(const Duration(milliseconds: 800));
+      expect(binding.calls, contains('startBurstRate'));
+      expect(find.text('2.0x 快放中'), findsOneWidget);
+
+      await g.up();
+      await tester.pump();
+      expect(binding.calls, contains('endBurstRate'));
+      expect(find.text('2.0x 快放中'), findsNothing);
 
       await unmount(tester);
     });
@@ -277,6 +319,99 @@ void main() {
       expect(binding.calls, isEmpty);
       expect(find.byType(PlayerCenterButton), findsNothing);
       expect(find.byIcon(Icons.lock), findsOneWidget);
+
+      await unmount(tester);
+    });
+  });
+
+  group('音轨 / 定时 / 片头尾', () {
+    testWidgets('只有一条音轨时不显示切换入口', (WidgetTester tester) async {
+      setSize(tester);
+      binding.audioTracks = <PlayerAudioTrack>[
+        const PlayerAudioTrack(id: '1', label: '国语'),
+      ];
+      await mount(tester);
+      expect(find.text('音轨'), findsNothing);
+      await unmount(tester);
+    });
+
+    testWidgets('多条音轨时弹层列出并回传选择', (WidgetTester tester) async {
+      setSize(tester);
+      binding.audioTracks = <PlayerAudioTrack>[
+        const PlayerAudioTrack(id: '1', label: '国语', codec: 'aac'),
+        const PlayerAudioTrack(id: '2', label: '粤语', codec: 'ac-3'),
+      ];
+      binding.audioId = '1';
+      await mount(tester);
+
+      await tester.tap(find.text('音轨'));
+      await tester.pumpAndSettle();
+      expect(find.text('粤语'), findsOneWidget);
+      expect(find.textContaining('AC-3'), findsOneWidget);
+
+      await tester.tap(find.text('粤语'));
+      await tester.pumpAndSettle();
+      expect(binding.calls, contains('selectAudioTrack:2'));
+
+      await unmount(tester);
+    });
+
+    testWidgets('定时弹层回传所选时长，生效后药丸显示剩余', (WidgetTester tester) async {
+      setSize(tester);
+      await mount(tester);
+
+      await tester.tap(find.text('定时'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('30 分钟'));
+      await tester.pumpAndSettle();
+      expect(binding.calls, contains('setSleepTimer:30'));
+
+      binding.sleepRemaining = const Duration(minutes: 29, seconds: 30);
+      binding.notifyListeners();
+      await tester.pump();
+      expect(find.text('29:30'), findsOneWidget);
+
+      await unmount(tester);
+    });
+
+    testWidgets('定时弹层可以选「本集播完」', (WidgetTester tester) async {
+      setSize(tester);
+      await mount(tester);
+
+      await tester.tap(find.text('定时'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('本集播完'));
+      await tester.pumpAndSettle();
+      expect(binding.calls, contains('setSleepAtEnd:true'));
+
+      await unmount(tester);
+    });
+
+    testWidgets('片头尾弹层把当前进度记为标记', (WidgetTester tester) async {
+      setSize(tester);
+      binding.position = const Duration(seconds: 95);
+      await mount(tester);
+
+      await tester.tap(find.text('片头尾'));
+      await tester.pumpAndSettle();
+      expect(find.text('片头片尾'), findsOneWidget);
+
+      await tester.tap(find.text('设为当前').first);
+      await tester.pump();
+      expect(binding.calls, contains('markIntroAt:95'));
+
+      await unmount(tester);
+    });
+
+    testWidgets('片头内出现「跳过片头」，点了就跳', (WidgetTester tester) async {
+      setSize(tester);
+      binding.inIntro = true;
+      await mount(tester);
+
+      expect(find.text('跳过片头'), findsOneWidget);
+      await tester.tap(find.text('跳过片头'));
+      await tester.pump();
+      expect(binding.calls, contains('skipIntro'));
 
       await unmount(tester);
     });
@@ -428,6 +563,33 @@ class FakeBinding extends ChangeNotifier implements PlayerControlsBinding {
   @override
   int? audioSampleRate;
 
+  @override
+  List<PlayerAudioTrack> audioTracks = const <PlayerAudioTrack>[];
+
+  @override
+  String? audioId;
+
+  @override
+  Duration? sleepRemaining;
+
+  @override
+  bool sleepAtEnd = false;
+
+  @override
+  int introMs = 0;
+
+  @override
+  int outroMs = 0;
+
+  @override
+  bool inIntro = false;
+
+  @override
+  bool autoSkipIntro = true;
+
+  @override
+  bool autoSkipOutro = true;
+
   double? volumeResult = 55.0;
 
   @override
@@ -467,6 +629,52 @@ class FakeBinding extends ChangeNotifier implements PlayerControlsBinding {
 
   @override
   Future<void> retry() async => calls.add('retry');
+
+  @override
+  Future<void> selectAudioTrack(String id) async =>
+      calls.add('selectAudioTrack:$id');
+
+  @override
+  Future<void> setSleepTimer(Duration? remaining) async =>
+      calls.add('setSleepTimer:${remaining?.inMinutes}');
+
+  @override
+  Future<void> setSleepAtEnd(bool value) async =>
+      calls.add('setSleepAtEnd:$value');
+
+  @override
+  Future<void> markIntroAt(Duration position) async =>
+      calls.add('markIntroAt:${position.inSeconds}');
+
+  @override
+  Future<void> markOutroAt(Duration position) async =>
+      calls.add('markOutroAt:${position.inSeconds}');
+
+  @override
+  Future<void> clearSkipMarks() async => calls.add('clearSkipMarks');
+
+  @override
+  Future<void> skipIntro() async => calls.add('skipIntro');
+
+  @override
+  Future<void> setAutoSkipIntro(bool value) async {
+    calls.add('setAutoSkipIntro:$value');
+    autoSkipIntro = value;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> setAutoSkipOutro(bool value) async {
+    calls.add('setAutoSkipOutro:$value');
+    autoSkipOutro = value;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> startBurstRate() async => calls.add('startBurstRate');
+
+  @override
+  Future<void> endBurstRate() async => calls.add('endBurstRate');
 
   @override
   void startSeek() => calls.add('startSeek');
