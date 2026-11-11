@@ -83,8 +83,8 @@ class SyncMerger {
     final List<_Entry<VodSource>> sources =
         _mergeList<VodSource>(_sources(a), _sources(b), tombs);
 
-    history.sort((_Entry<PlayRecord> x, _Entry<PlayRecord> y) =>
-        y.ts.compareTo(x.ts));
+    history.sort(
+        (_Entry<PlayRecord> x, _Entry<PlayRecord> y) => y.ts.compareTo(x.ts));
     favorites.sort((_Entry<FavoriteItem> x, _Entry<FavoriteItem> y) =>
         y.ts.compareTo(x.ts));
     // 源的顺序是用户自己排的，合并后仍然按 sort 走，不能按时间重排。
@@ -174,7 +174,8 @@ class SyncMerger {
     List<_Entry<T>> right,
     Map<String, Map<String, int>> tombs,
   ) {
-    final Map<String, int> tomb = tombs[_collectionOf<T>()] ?? const <String, int>{};
+    final Map<String, int> tomb =
+        tombs[_collectionOf<T>()] ?? const <String, int>{};
 
     final Map<String, _Entry<T>> byKey = <String, _Entry<T>>{};
     for (final _Entry<T> e in left) {

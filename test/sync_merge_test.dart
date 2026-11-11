@@ -44,7 +44,8 @@ void main() {
         tombstones: tombs,
       );
 
-  Set<String> keys(List<PlayRecord> l) => l.map((PlayRecord e) => e.key).toSet();
+  Set<String> keys(List<PlayRecord> l) =>
+      l.map((PlayRecord e) => e.key).toSet();
 
   group('合并规则', () {
     test('两边各自新增的条目都要留下，不能互相覆盖', () {
@@ -71,8 +72,7 @@ void main() {
       final SyncPayload merged = SyncMerger.merge(a, b);
 
       expect(merged.history, hasLength(1));
-      expect(merged.history.first.positionMs, 999,
-          reason: '对方那台更新过，应当采用对方的进度');
+      expect(merged.history.first.positionMs, 999, reason: '对方那台更新过，应当采用对方的进度');
     });
 
     test('结果与参数顺序无关（合并对称）', () {
@@ -104,15 +104,15 @@ void main() {
         history: <PlayRecord>[rec('s|1', t1)],
         tombs: <String, Map<String, int>>{
           SyncBox.history: <String, int>{
-            's|1': now.subtract(const Duration(hours: 1)).millisecondsSinceEpoch,
+            's|1':
+                now.subtract(const Duration(hours: 1)).millisecondsSinceEpoch,
           },
         },
       );
 
       final SyncPayload merged = SyncMerger.merge(a, b);
 
-      expect(merged.history, isEmpty,
-          reason: '删除时刻晚于条目时刻，应当保持删除');
+      expect(merged.history, isEmpty, reason: '删除时刻晚于条目时刻，应当保持删除');
     });
 
     test('条目比墓碑新时，条目复活（删了之后又重新看过）', () {
@@ -130,8 +130,7 @@ void main() {
 
       final SyncPayload merged = SyncMerger.merge(a, b);
 
-      expect(merged.history, hasLength(1),
-          reason: '墓碑比条目旧，说明删除早已被后续播放覆盖，不该再删');
+      expect(merged.history, hasLength(1), reason: '墓碑比条目旧，说明删除早已被后续播放覆盖，不该再删');
     });
 
     test('墓碑随合并结果一起带过去，下一轮仍然生效', () {
@@ -208,8 +207,7 @@ void main() {
     });
 
     test('完全没变时 isEmpty 为真，摘要提示一致', () {
-      final SyncPayload p =
-          payload(history: <PlayRecord>[rec('keep', now)]);
+      final SyncPayload p = payload(history: <PlayRecord>[rec('keep', now)]);
 
       final SyncDiff d = SyncMerger.diff(p, p);
 

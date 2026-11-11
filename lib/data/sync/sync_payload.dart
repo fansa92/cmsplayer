@@ -93,10 +93,7 @@ class SyncPayload {
       SyncPayload(updatedAt: DateTime.fromMillisecondsSinceEpoch(0));
 
   static List<Map<String, dynamic>> _maps(Object? raw) => raw is List
-      ? raw
-          .whereType<Map>()
-          .map((Map e) => e.cast<String, dynamic>())
-          .toList()
+      ? raw.whereType<Map>().map((Map e) => e.cast<String, dynamic>()).toList()
       : <Map<String, dynamic>>[];
 
   static Map<String, Map<String, int>> _tombstonesOf(Object? raw) {
@@ -124,7 +121,8 @@ class SyncPayload {
     Duration keepFor = const Duration(days: 365),
     int maxEntries = 4000,
   }) {
-    final int cutoff = (now ?? DateTime.now()).subtract(keepFor).millisecondsSinceEpoch;
+    final int cutoff =
+        (now ?? DateTime.now()).subtract(keepFor).millisecondsSinceEpoch;
     final Map<String, Map<String, int>> out = <String, Map<String, int>>{};
     final List<MapEntry<String, MapEntry<String, int>>> flat =
         <MapEntry<String, MapEntry<String, int>>>[];

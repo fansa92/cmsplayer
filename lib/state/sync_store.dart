@@ -153,7 +153,7 @@ class SyncStore extends ChangeNotifier {
 
   Future<void> syncWebDav() async {
     final WebDavTransport t = webDavTransport();
-    await _run(t);
+    await runWith(t);
   }
 
   Future<void> syncLan() async {
@@ -163,10 +163,14 @@ class SyncStore extends ChangeNotifier {
       return;
     }
     final LanClient client = LanClient(host: lanHost.trim(), port: lanPort);
-    await _run(client);
+    await runWith(client);
   }
 
-  Future<void> _run(SyncTransport transport) async {
+  /// 用给定通道跑一次同步（测试注入点）。
+  ///
+  /// 生产代码由 syncWebDav / syncLan 构造真实通道；测试传入假通道，
+  /// 即可覆盖状态流转、失败提示与同步后的 Store 重载。
+  Future<void> runWith(SyncTransport transport) async {
     busy = true;
     lastError = null;
     lastMessage = null;

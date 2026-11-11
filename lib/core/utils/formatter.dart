@@ -68,4 +68,5 @@ double safeRatio(double value, double max) {
 }
 
 /// 数值夹取。
-double clampDouble(double v, double min, double max) => math.max(min, math.min(max, v));
+double clampDouble(double v, double min, double max) =>
+    math.max(min, math.min(max, v));

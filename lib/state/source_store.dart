@@ -52,6 +52,17 @@ class SourceStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 连通性测试的实现（测试注入点）。
+  ///
+  /// 默认真的去 ping 资源站；测试里换成内存实现即可覆盖批量测试的状态流转，
+  /// 不需要起 HTTP 服务。
+  static Future<bool> Function(VodSource source) pinger =
+      (VodSource source) => MacCmsApi(source).ping();
+
+  static void resetPinger() {
+    pinger = (VodSource source) => MacCmsApi(source).ping();
+  }
+
   // ---------------------------------------------------------------- 生命周期
 
   /// 本表在墓碑里的类型名。
@@ -105,6 +116,7 @@ class SourceStore extends ChangeNotifier {
         parseApi: source.parseApi,
         referer: source.referer,
         userAgent: source.userAgent,
+        charset: source.charset,
       );
     } else {
       _sources.add(source.copyWith(sort: _nextSort()));
@@ -119,8 +131,7 @@ class SourceStore extends ChangeNotifier {
     if (incoming.isEmpty) return 0;
     int added = 0;
     for (final VodSource source in incoming) {
-      final int index =
-          _sources.indexWhere((VodSource s) => s.id == source.id);
+      final int index = _sources.indexWhere((VodSource s) => s.id == source.id);
       if (index >= 0) {
         final VodSource old = _sources[index];
         _sources[index] = old.copyWith(
@@ -130,6 +141,7 @@ class SourceStore extends ChangeNotifier {
           referer: source.referer.isNotEmpty ? source.referer : old.referer,
           userAgent:
               source.userAgent.isNotEmpty ? source.userAgent : old.userAgent,
+          charset: source.charset.isNotEmpty ? source.charset : old.charset,
         );
       } else {
         _sources.add(source.copyWith(sort: _nextSort() + added));
@@ -143,8 +155,7 @@ class SourceStore extends ChangeNotifier {
   }
 
   Future<void> update(VodSource source) async {
-    final int index =
-        _sources.indexWhere((VodSource s) => s.id == source.id);
+    final int index = _sources.indexWhere((VodSource s) => s.id == source.id);
     if (index < 0) return;
     _sources[index] = source;
     await _persist();
@@ -179,7 +190,8 @@ class SourceStore extends ChangeNotifier {
   Future<void> toggleEnabled(String id) async {
     final int index = _sources.indexWhere((VodSource s) => s.id == id);
     if (index < 0) return;
-    _sources[index] = _sources[index].copyWith(enabled: !_sources[index].enabled);
+    _sources[index] =
+        _sources[index].copyWith(enabled: !_sources[index].enabled);
     await _persist();
     _ensureActive();
     _emit();
@@ -214,7 +226,10 @@ class SourceStore extends ChangeNotifier {
 
   int _nextSort() => _sources.isEmpty
       ? 0
-      : _sources.map((VodSource s) => s.sort).reduce((int a, int b) => a > b ? a : b) + 1;
+      : _sources
+              .map((VodSource s) => s.sort)
+              .reduce((int a, int b) => a > b ? a : b) +
+          1;
 
   // ---------------------------------------------------------------- 测试
 
@@ -222,7 +237,7 @@ class SourceStore extends ChangeNotifier {
     _testingId = source.id;
     _emit();
     try {
-      return await MacCmsApi(source).ping();
+      return await pinger(source);
     } finally {
       _testingId = null;
       _emit();
@@ -231,9 +246,8 @@ class SourceStore extends ChangeNotifier {
 
   /// 并发测试多个源，返回通过的 ID 集合。
   Future<Set<String>> testMany(List<VodSource> targets) async {
-    final List<Future<bool>> futures = targets
-        .map((VodSource s) => MacCmsApi(s).ping())
-        .toList();
+    final List<Future<bool>> futures =
+        targets.map((VodSource s) => pinger(s)).toList();
     final List<bool> results = await Future.wait(futures);
     final Set<String> ok = <String>{};
     for (int i = 0; i < targets.length; i++) {

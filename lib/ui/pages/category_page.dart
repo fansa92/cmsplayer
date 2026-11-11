@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants.dart';
+import '../../core/utils/responsive.dart';
 import '../../data/models/vod_category.dart';
 import '../../data/models/vod_item.dart';
 import '../../data/models/vod_source.dart';
@@ -9,6 +10,7 @@ import '../../state/browse_store.dart';
 import '../../state/history_store.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/option_picker.dart';
+import '../widgets/poster_skeleton.dart';
 import '../widgets/vod_grid.dart';
 import '../navigation.dart';
 
@@ -29,7 +31,8 @@ class CategoryPage extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        if (browse.selectableCategories.isNotEmpty) _CategoryBar(browse: browse),
+        if (browse.selectableCategories.isNotEmpty)
+          _CategoryBar(browse: browse),
         _FilterBar(browse: browse),
         Expanded(child: _buildBody(context, browse, source, headers, history)),
       ],
@@ -43,7 +46,9 @@ class CategoryPage extends StatelessWidget {
     Map<String, String> headers,
     HistoryStore history,
   ) {
-    if (browse.loading && browse.items.isEmpty) return const PageLoading();
+    if (browse.loading && browse.items.isEmpty) {
+      return const PosterGridSkeleton();
+    }
 
     if (browse.error != null && browse.items.isEmpty) {
       return ErrorState(
@@ -128,63 +133,86 @@ class _FilterBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(
         children: <Widget>[
-          _FilterButton(
-            label: browse.year.isEmpty ? '年代' : browse.year,
-            active: browse.year.isNotEmpty,
-            onTap: () => _pick(
-              context,
-              title: '按年代筛选',
-              options: K.yearOptions,
-              selected: browse.year,
-              apply: (String v) => browse.applyFilter(year: v),
+          // 三个筛选按钮 + 清除 + 页数文字在 360dp 手机上会超过一行，
+          // 原来没有 Flexible / 滚动容器，直接 RenderFlex overflow 报错。
+          // 左侧改成可横向滑动，右侧总数只在宽度够用时显示。
+          Expanded(
+            // 外壳的 Column 给非 flexible 子项的是无界高度；横向
+            // SingleChildScrollView 拿到无界 cross axis 会把 viewport 撑到
+            // 一个巨大高度，整页 RenderFlex 溢出。这里定死筛选栏行高。
+            child: SizedBox(
+              height: 40,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    _FilterButton(
+                      label: browse.year.isEmpty ? '年代' : browse.year,
+                      active: browse.year.isNotEmpty,
+                      onTap: () => _pick(
+                        context,
+                        title: '按年代筛选',
+                        options: K.yearOptions,
+                        selected: browse.year,
+                        apply: (String v) => browse.applyFilter(year: v),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _FilterButton(
+                      label: browse.area.isEmpty ? '地区' : browse.area,
+                      active: browse.area.isNotEmpty,
+                      onTap: () => _pick(
+                        context,
+                        title: '按地区筛选',
+                        options: K.areaOptions,
+                        selected: browse.area,
+                        apply: (String v) => browse.applyFilter(area: v),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _FilterButton(
+                      label: browse.sortBy.isEmpty
+                          ? '排序'
+                          : (K.sortOptions[browse.sortBy] ?? browse.sortBy),
+                      active: browse.sortBy.isNotEmpty,
+                      onTap: () => _pick(
+                        context,
+                        title: '排序方式',
+                        options: K.sortOptions.values.toList(),
+                        selected: K.sortOptions[browse.sortBy],
+                        apply: (String v) {
+                          final String? key = K.sortOptions.entries
+                              .where(
+                                  (MapEntry<String, String> e) => e.value == v)
+                              .map((MapEntry<String, String> e) => e.key)
+                              .firstOrNull;
+                          browse.applyFilter(sortBy: key ?? '');
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    if (browse.hasFilter)
+                      IconButton(
+                        tooltip: '清除筛选',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: browse.clearFilter,
+                        icon:
+                            const Icon(Icons.filter_alt_off_outlined, size: 20),
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
-          const SizedBox(width: 8),
-          _FilterButton(
-            label: browse.area.isEmpty ? '地区' : browse.area,
-            active: browse.area.isNotEmpty,
-            onTap: () => _pick(
-              context,
-              title: '按地区筛选',
-              options: K.areaOptions,
-              selected: browse.area,
-              apply: (String v) => browse.applyFilter(area: v),
-            ),
-          ),
-          const SizedBox(width: 8),
-          _FilterButton(
-            label: browse.sortBy.isEmpty
-                ? '排序'
-                : (K.sortOptions[browse.sortBy] ?? browse.sortBy),
-            active: browse.sortBy.isNotEmpty,
-            onTap: () => _pick(
-              context,
-              title: '排序方式',
-              options: K.sortOptions.values.toList(),
-              selected: K.sortOptions[browse.sortBy],
-              apply: (String v) {
-                final String? key = K.sortOptions.entries
-                    .where((MapEntry<String, String> e) => e.value == v)
-                    .map((MapEntry<String, String> e) => e.key)
-                    .firstOrNull;
-                browse.applyFilter(sortBy: key ?? '');
-              },
-            ),
-          ),
-          const SizedBox(width: 4),
-          if (browse.hasFilter)
-            IconButton(
-              tooltip: '清除筛选',
-              visualDensity: VisualDensity.compact,
-              onPressed: browse.clearFilter,
-              icon: const Icon(Icons.filter_alt_off_outlined, size: 20),
-            ),
-          const Spacer(),
-          if (browse.total > 0)
-            Text(
-              '共 ${browse.total} 部 · ${browse.pageNo}/${browse.pageCount} 页',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+          if (browse.total > 0 && !context.isCompact)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Text(
+                '共 ${browse.total} 部 · ${browse.pageNo}/${browse.pageCount} 页',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
         ],

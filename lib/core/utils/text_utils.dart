@@ -23,7 +23,8 @@ int intOf(Object? value, [int fallback = 0]) {
 /// 去掉 HTML 标签并解码实体，简介 / 演员字段会带 `<p>`、`<br>`。
 String stripHtml(String? input) {
   if (input == null || input.isEmpty) return '';
-  String text = input.replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n');
+  String text =
+      input.replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n');
   text = text.replaceAll(RegExp(r'</p\s*>', caseSensitive: false), '\n');
   text = text.replaceAll(RegExp(r'<[^>]*>'), '');
   text = decodeEntities(text);
@@ -97,7 +98,10 @@ List<int> _utf8(String input) {
 String originOf(String api) {
   final Uri? uri = Uri.tryParse(api.trim());
   if (uri == null || !uri.hasScheme || uri.host.isEmpty) return '';
-  return uri.replace(path: '', query: null, fragment: null).toString();
+  // 必须重新构造：Uri.replace 的 null 参数表示"保持原样"，用
+  // replace(path: '', query: null, fragment: null) 会把 ?query / #fragment
+  // 留在结果里，拿去当 Referer 就变成了 `https://site.com?ac=list/`。
+  return Uri(scheme: uri.scheme, host: uri.host, port: uri.port).toString();
 }
 
 /// 把可能缺少协议头的地址补全为绝对地址。
@@ -113,7 +117,8 @@ String? resolveUrl(String? raw, {String? base}) {
   }
   if (text.startsWith('//')) {
     final Uri? baseUri = base == null ? null : Uri.tryParse(base);
-    final String scheme = baseUri?.scheme.isEmpty ?? true ? 'https' : baseUri!.scheme;
+    final String scheme =
+        baseUri?.scheme.isEmpty ?? true ? 'https' : baseUri!.scheme;
     return '$scheme:$text';
   }
   if (base == null || base.isEmpty) return text;

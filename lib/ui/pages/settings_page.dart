@@ -11,6 +11,7 @@ import '../../state/history_store.dart';
 import '../../state/source_store.dart';
 import '../../state/sync_store.dart';
 import '../actions.dart';
+import '../widgets/hint_paragraph.dart';
 import 'sync_page.dart';
 
 /// 设置页。
@@ -53,7 +54,6 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: Text(_themeLabel(app.themeMode)),
             onTap: () => _pickTheme(context, app),
           ),
-
           const _SectionLabel('播放'),
           ListTile(
             leading: const Icon(Icons.speed),
@@ -94,7 +94,6 @@ class _SettingsPageState extends State<SettingsPage> {
             value: app.hardwareDecode,
             onChanged: (bool v) => app.setHardwareDecode(v),
           ),
-
           const _SectionLabel('搜索'),
           SwitchListTile(
             secondary: const Icon(Icons.all_inclusive),
@@ -103,7 +102,6 @@ class _SettingsPageState extends State<SettingsPage> {
             value: app.multiSourceSearch,
             onChanged: (bool v) => app.setMultiSourceSearch(v),
           ),
-
           const _SectionLabel('同步'),
           ListTile(
             leading: const Icon(Icons.sync_outlined),
@@ -113,7 +111,6 @@ class _SettingsPageState extends State<SettingsPage> {
               MaterialPageRoute<void>(builder: (_) => const SyncPage()),
             ),
           ),
-
           const _SectionLabel('存储'),
           ListTile(
             leading: const Icon(Icons.cached),
@@ -122,9 +119,8 @@ class _SettingsPageState extends State<SettingsPage> {
               _cacheBytes == null ? '计算中…' : formatBytes(_cacheBytes!),
             ),
             trailing: TextButton(
-              onPressed: _cacheBytes == null || _cacheBytes == 0
-                  ? null
-                  : _clearCache,
+              onPressed:
+                  _cacheBytes == null || _cacheBytes == 0 ? null : _clearCache,
               child: const Text('清理'),
             ),
           ),
@@ -148,22 +144,18 @@ class _SettingsPageState extends State<SettingsPage> {
               run: () => context.read<FavoritesStore>().clear(),
             ),
           ),
-
           const _SectionLabel('关于'),
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: const Text('版本'),
             subtitle: Text('${K.appVersion} · ${PlatformInfo.label}'),
           ),
-          const Padding(
+          const HintParagraph(
+            '本应用本身不内置、不提供、不分发任何影片内容，'
+            '仅作为一个 macCMS（苹果CMS）VOD 接口的播放器，'
+            '所有内容均由用户自行添加的资源站提供。\n\n'
+            '请仅用于播放你有权访问的内容。',
             padding: EdgeInsets.fromLTRB(16, 8, 16, 24),
-            child: Text(
-              '本应用本身不内置、不提供、不分发任何影片内容，'
-              '仅作为一个 macCMS（苹果CMS）VOD 接口的播放器，'
-              '所有内容均由用户自行添加的资源站提供。\n\n'
-              '请仅用于播放你有权访问的内容。',
-              style: TextStyle(fontSize: 12, height: 1.7),
-            ),
           ),
         ],
       ),

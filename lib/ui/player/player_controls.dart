@@ -6,9 +6,9 @@ import 'package:flutter/services.dart';
 import '../../core/constants.dart';
 import '../../core/utils/formatter.dart';
 import '../../core/utils/responsive.dart';
-import '../../data/models/play_line.dart';
-import 'battery_badge.dart';
-import 'player_controller.dart';
+import 'player_chrome.dart';
+import 'player_controls_binding.dart';
+import 'player_sheets.dart';
 import 'player_window.dart';
 
 /// 播放器控制层。
@@ -22,7 +22,7 @@ class PlayerControls extends StatefulWidget {
     required this.onBack,
   });
 
-  final PlayerController controller;
+  final PlayerControlsBinding controller;
   final VoidCallback onBack;
 
   @override
@@ -43,7 +43,7 @@ class _PlayerControlsState extends State<PlayerControls> {
   String? _osd;
   Timer? _osdTimer;
 
-  PlayerController get controller => widget.controller;
+  PlayerControlsBinding get controller => widget.controller;
 
   @override
   void initState() {
@@ -309,10 +309,12 @@ class _PlayerControlsState extends State<PlayerControls> {
                 _focusNode.requestFocus();
                 _toggle();
               },
-              onDoubleTap: locked ? null : () {
-                controller.togglePlay();
-                _show();
-              },
+              onDoubleTap: locked
+                  ? null
+                  : () {
+                      controller.togglePlay();
+                      _show();
+                    },
               onHorizontalDragStart: locked ? null : _onHorizontalDragStart,
               onHorizontalDragUpdate: locked ? null : _onHorizontalDragUpdate,
               onHorizontalDragEnd: locked ? null : _onHorizontalDragEnd,
@@ -323,183 +325,79 @@ class _PlayerControlsState extends State<PlayerControls> {
             ),
 
             if (controller.error != null && !controller.buffering)
-              _ErrorPanel(
+              PlayerErrorPanel(
                 message: controller.error!,
                 onRetry: controller.retry,
               ),
 
+            if (controller.fallbackTrying != null ||
+                controller.fallbackNotice != null)
+              Positioned(
+                left: 0,
+                right: 0,
+                top: MediaQuery.paddingOf(context).top + 56,
+                child: Center(
+                  child: PlayerFallbackBanner(
+                    trying: controller.fallbackTrying,
+                    notice: controller.fallbackNotice,
+                  ),
+                ),
+              ),
+
             if (_visible) ...<Widget>[
-              _buildTopBar(context, locked: locked),
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                child: PlayerTopBar(
+                  title: controller.task.title,
+                  subtitle: controller.task.subtitle,
+                  locked: locked,
+                  fullScreen: _fullScreen,
+                  onBack: widget.onBack,
+                  onToggleOrientation: _toggleOrientation,
+                  onToggleFullScreen: _toggleFullScreen,
+                  onInfo: () {
+                    _openInfoSheet();
+                    _scheduleHide();
+                  },
+                  onEpisodes: () {
+                    _openEpisodeSheet();
+                    _scheduleHide();
+                  },
+                ),
+              ),
               if (!locked) ...<Widget>[
-                _buildCenter(context),
+                PlayerCenterButton(
+                  buffering: controller.buffering,
+                  starting: controller.starting,
+                  playing: controller.playing,
+                  onTap: () {
+                    controller.togglePlay();
+                    _show();
+                  },
+                ),
                 _buildBottomBar(context),
               ],
-              _buildLockButton(context, locked: locked),
+              Positioned(
+                left: 4,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: PlayerLockButton(
+                    locked: locked,
+                    onTap: () {
+                      controller.toggleLock();
+                      _show();
+                    },
+                  ),
+                ),
+              ),
             ],
             _buildGestureIndicator(context),
           ],
         );
       },
-    );
-  }
-
-  Widget _buildTopBar(BuildContext context, {required bool locked}) {
-    final ThemeData theme = Theme.of(context);
-    final bool isLandscape =
-        MediaQuery.orientationOf(context) == Orientation.landscape;
-    return Positioned(
-      left: 0,
-      right: 0,
-      top: 0,
-      child: Container(
-        padding: EdgeInsets.only(
-          top: MediaQuery.paddingOf(context).top + 6,
-          left: 8,
-          right: 8,
-        ),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: <Color>[Colors.black87, Colors.transparent],
-          ),
-        ),
-        child: Row(
-          children: <Widget>[
-            IconButton(
-              tooltip: '返回',
-              color: Colors.white,
-              icon: const Icon(Icons.arrow_back),
-              onPressed: widget.onBack,
-            ),
-            const SizedBox(width: 4),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    controller.task.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (controller.task.subtitle.isNotEmpty)
-                    Text(
-                      controller.task.subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.white70,
-                        fontSize: 11,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            // 电量是纯信息，锁定时照样显示 —— 看片最怕的就是突然没电。
-            if (PlatformInfo.isMobile) const BatteryBadge(),
-            if (PlatformInfo.isMobile && !locked)
-              IconButton(
-                tooltip: isLandscape ? '切换到竖屏' : '横屏播放',
-                color: Colors.white,
-                icon: Icon(isLandscape
-                    ? Icons.stay_current_portrait
-                    : Icons.stay_current_landscape),
-                onPressed: _toggleOrientation,
-              ),
-            if (PlatformInfo.isDesktop)
-              IconButton(
-                tooltip: _fullScreen ? '退出全屏 (Esc)' : '全屏 (F)',
-                color: Colors.white,
-                icon: Icon(
-                  _fullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                ),
-                onPressed: locked ? null : _toggleFullScreen,
-              ),
-            if (!locked)
-              IconButton(
-                tooltip: '视频信息',
-                color: Colors.white,
-                icon: const Icon(Icons.info_outline),
-                onPressed: () {
-                  _showInfoSheet(context);
-                  _scheduleHide();
-                },
-              ),
-            if (!locked)
-              IconButton(
-                tooltip: '选集',
-                color: Colors.white,
-                icon: const Icon(Icons.playlist_play),
-                onPressed: () {
-                  _showEpisodeSheet(context);
-                  _scheduleHide();
-                },
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCenter(BuildContext context) {
-    final bool showSpinner = controller.buffering || controller.starting;
-
-    return Center(
-      child: showSpinner
-          ? const SizedBox(
-              width: 44,
-              height: 44,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                color: Colors.white,
-              ),
-            )
-          : IconButton(
-              iconSize: 56,
-              color: Colors.white,
-              style: IconButton.styleFrom(
-                backgroundColor: Colors.black38,
-                padding: const EdgeInsets.all(20),
-              ),
-              onPressed: () {
-                controller.togglePlay();
-                _show();
-              },
-              icon: Icon(
-                controller.playing ? Icons.pause : Icons.play_arrow,
-              ),
-            ),
-    );
-  }
-
-  /// 锁定按钮：屏幕最左侧、垂直居中。
-  ///
-  /// 放最左是因为中央已经有播放键，而顶栏在手机上要留给标题、电量、横屏
-  /// 和选集；最左侧这条竖带平时空着，既好找也不会遮到画面主体。
-  ///
-  /// 它和其余控件一样挂在 [_visible] 下自动隐藏，单击画面即可重新唤出。
-  Widget _buildLockButton(BuildContext context, {required bool locked}) {
-    return Positioned(
-      left: 4,
-      top: 0,
-      bottom: 0,
-      child: Center(
-        child: IconButton(
-          tooltip: locked ? '已锁定播放控件，点击解锁' : '锁定播放控件',
-          color: Colors.white,
-          style: IconButton.styleFrom(backgroundColor: Colors.black26),
-          icon: Icon(locked ? Icons.lock : Icons.lock_open),
-          onPressed: () {
-            controller.toggleLock();
-            _show();
-          },
-        ),
-      ),
     );
   }
 
@@ -510,7 +408,9 @@ class _PlayerControlsState extends State<PlayerControls> {
     final double totalMs = duration.inMilliseconds.toDouble();
     final double value = totalMs <= 0
         ? 0
-        : (controller.seeking ? controller.seekRatio : controller.positionRatio);
+        : (controller.seeking
+            ? controller.seekRatio
+            : controller.positionRatio);
 
     return Positioned(
       left: 0,
@@ -541,7 +441,9 @@ class _PlayerControlsState extends State<PlayerControls> {
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: Colors.white,
-                      fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+                      fontFeatures: const <FontFeature>[
+                        FontFeature.tabularFigures()
+                      ],
                     ),
                   ),
                 ),
@@ -565,7 +467,9 @@ class _PlayerControlsState extends State<PlayerControls> {
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: Colors.white70,
-                      fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+                      fontFeatures: const <FontFeature>[
+                        FontFeature.tabularFigures()
+                      ],
                     ),
                   ),
                 ),
@@ -573,15 +477,15 @@ class _PlayerControlsState extends State<PlayerControls> {
             ),
             Row(
               children: <Widget>[
-                _PillButton(
+                PlayerPillButton(
                   label: '${controller.rate}x',
                   onTap: () {
-                    _showRateSheet(context);
+                    _openRateSheet();
                     _scheduleHide();
                   },
                 ),
                 const SizedBox(width: 8),
-                _PillButton(
+                PlayerPillButton(
                   label: controller.fitLabel,
                   onTap: () {
                     controller.cycleFit();
@@ -591,7 +495,7 @@ class _PlayerControlsState extends State<PlayerControls> {
                 // 清晰度：纯信息，不做成按钮，点它不如点顶栏的"视频信息"。
                 if (controller.resolutionLabel != null) ...<Widget>[
                   const SizedBox(width: 8),
-                  _InfoChip(label: controller.resolutionLabel!),
+                  PlayerInfoChip(label: controller.resolutionLabel!),
                 ],
                 const Spacer(),
                 if (controller.task.hasPrev)
@@ -622,10 +526,48 @@ class _PlayerControlsState extends State<PlayerControls> {
     );
   }
 
+  // ---------------------------------------------------------------- 弹层
+
+  void _openRateSheet() {
+    showRateSheet(
+      context,
+      current: controller.rate,
+      onPick: controller.setRate,
+    );
+  }
+
+  void _openEpisodeSheet() {
+    showEpisodeSheet(
+      context,
+      title: controller.task.title,
+      lines: controller.task.item.playLines,
+      lineIndex: controller.task.lineIndex,
+      episodeIndex: controller.task.episodeIndex,
+      onPick: (int line, int episode) {
+        controller.selectEpisode(line, episode);
+        _show();
+      },
+    );
+  }
+
+  void _openInfoSheet() {
+    showInfoSheet(
+      context,
+      resolution: controller.resolutionLabel,
+      fps: controller.fpsLabel,
+      videoCodec: controller.videoCodec,
+      videoDecoder: controller.videoDecoder,
+      pixelFormat: controller.pixelFormat,
+      audioCodec: controller.audioCodec,
+      audioChannels: controller.audioChannels,
+      audioSampleRate: controller.audioSampleRate,
+    );
+  }
+
   Widget _buildGestureIndicator(BuildContext context) {
     if (controller.seeking) {
       return Center(
-        child: _GlassBox(
+        child: PlayerGlassBox(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
@@ -650,11 +592,10 @@ class _PlayerControlsState extends State<PlayerControls> {
 
     if (controller.adjustingVolume || controller.adjustingBrightness) {
       final bool volume = controller.adjustingVolume;
-      final double ratio = volume
-          ? controller.gestureVolume
-          : controller.gestureBrightness;
+      final double ratio =
+          volume ? controller.gestureVolume : controller.gestureBrightness;
       return Center(
-        child: _GlassBox(
+        child: PlayerGlassBox(
           width: 120,
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -690,7 +631,7 @@ class _PlayerControlsState extends State<PlayerControls> {
     // 键盘操作的浮层提示（音量 / 快进步长）。
     if (_osd != null) {
       return Center(
-        child: _GlassBox(
+        child: PlayerGlassBox(
           child: Text(
             _osd!,
             style: const TextStyle(
@@ -704,404 +645,5 @@ class _PlayerControlsState extends State<PlayerControls> {
     }
 
     return const SizedBox.shrink();
-  }
-
-  // ---------------------------------------------------------------- 面板
-
-  /// 倍速弹层。
-  ///
-  /// 必须限高 + 可滚动：showModalBottomSheet 默认只给屏高 9/16，手机横屏
-  /// 时高度约 390px，8 个倍速选项根本放不下，不滚动的话只能看到前几个。
-  /// 这里的写法与 [_showEpisodeSheet] 保持一致。
-  Future<void> _showRateSheet(BuildContext context) async {
-    final double? result = await showModalBottomSheet<double>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (BuildContext ctx) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(ctx).height * 0.6,
-          ),
-          child: ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.only(bottom: 8),
-            children: <Widget>[
-              for (final double rate in K.playRates)
-                ListTile(
-                  dense: true,
-                  leading: Icon(
-                    rate == controller.rate ? Icons.check : Icons.speed,
-                    size: 20,
-                  ),
-                  title: Text('${rate}x'),
-                  onTap: () => Navigator.of(ctx).pop(rate),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (result != null) await controller.setRate(result);
-  }
-
-  Future<void> _showEpisodeSheet(BuildContext context) async {
-    final List<PlayLine> lines = controller.task.item.playLines;
-    if (lines.isEmpty) return;
-    int lineIdx = controller.task.lineIndex.clamp(0, lines.length - 1);
-
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (BuildContext ctx) => StatefulBuilder(
-        builder: (BuildContext ctx, void Function(void Function()) setSheet) {
-          final PlayLine line = lines[lineIdx];
-          return SafeArea(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(ctx).height * 0.65,
-              ),
-              child: ListView(
-                shrinkWrap: true,
-                padding: const EdgeInsets.only(bottom: 16),
-                children: <Widget>[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                    child: Text(
-                      controller.task.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                  ),
-                  // 线路横排放一行，选中线路的选集列在下面。
-                  if (lines.length > 1)
-                    SizedBox(
-                      height: 40,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: lines.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 8),
-                        itemBuilder: (BuildContext c, int li) {
-                          final bool selected = li == lineIdx;
-                          return ChoiceChip(
-                            label: Text(
-                              '${lines[li].name} (${lines[li].episodes.length})',
-                            ),
-                            selected: selected,
-                            onSelected: (_) => setSheet(() => lineIdx = li),
-                          );
-                        },
-                      ),
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-                    child: Text(
-                      line.name,
-                      style: Theme.of(ctx).textTheme.labelLarge?.copyWith(
-                            color: Theme.of(ctx).colorScheme.primary,
-                          ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: <Widget>[
-                        for (int ei = 0; ei < line.episodes.length; ei++)
-                          ActionChip(
-                            label: Text(line.episodes[ei].name),
-                            avatar: (lineIdx == controller.task.lineIndex &&
-                                    ei == controller.task.episodeIndex)
-                                ? const Icon(Icons.play_arrow, size: 16)
-                                : null,
-                            onPressed: () {
-                              Navigator.of(ctx).pop();
-                              controller.selectEpisode(lineIdx, ei);
-                              _show();
-                            },
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  /// mpv track-list 的 `codec` 字段给的是短名（h264 / hevc / av1 / aac …），
-  /// 有时也会是 FourCC（avc1 / hvc1 / mp4a）。这里统一翻译成人看得懂的名字；
-  /// 认不出就原样显示，不瞎猜。
-  static const Map<String, String> _codecNames = <String, String>{
-    // 视频
-    'avc1': 'H.264 / AVC',
-    'avc3': 'H.264 / AVC',
-    'h264': 'H.264 / AVC',
-    'x264': 'H.264 / AVC',
-    'hev1': 'H.265 / HEVC',
-    'hvc1': 'H.265 / HEVC',
-    'hevc': 'H.265 / HEVC',
-    'h265': 'H.265 / HEVC',
-    'x265': 'H.265 / HEVC',
-    'vp09': 'VP9',
-    'vp9': 'VP9',
-    'vp8': 'VP8',
-    'vp08': 'VP8',
-    'av01': 'AV1',
-    'av1': 'AV1',
-    'mpeg2video': 'MPEG-2',
-    'mpeg2': 'MPEG-2',
-    'mpeg4': 'MPEG-4',
-    'xvid': 'MPEG-4 (Xvid)',
-    'theora': 'Theora',
-    'vc1': 'VC-1',
-    'wmv3': 'WMV3',
-    // 音频
-    'mp4a': 'AAC',
-    'aac': 'AAC',
-    'heaac': 'HE-AAC',
-    'ac-3': 'AC-3',
-    'ac3': 'AC-3',
-    'ec-3': 'E-AC-3',
-    'eac3': 'E-AC-3',
-    'dts': 'DTS',
-    'opus': 'Opus',
-    'vorbis': 'Vorbis',
-    'flac': 'FLAC',
-    'mp3': 'MP3',
-    'mp2': 'MP2',
-    'alac': 'ALAC',
-    'pcm': 'PCM',
-    'pcm_s16le': 'PCM (16-bit)',
-    'pcm_s24le': 'PCM (24-bit)',
-    'truehd': 'TrueHD',
-    'amr_nb': 'AMR-NB',
-  };
-
-  String _describeCodec(String? raw) {
-    if (raw == null || raw.isEmpty) return '';
-    final String key = raw.trim().toLowerCase();
-    final String? name = _codecNames[key];
-    return name == null ? raw : '$name（$raw）';
-  }
-
-  /// 视频信息面板：分辨率、帧率、编码、解码器、像素格式、音频参数。
-  ///
-  /// mpv 要等文件真正打开并探测完才给得出这些值，纯音频或探测失败时大部分
-  /// 是 null —— 对应那几行干脆不显示，而不是摆一个"未知"占位。
-  Future<void> _showInfoSheet(BuildContext context) async {
-    final String? resolution = controller.resolutionLabel;
-    final String? fps = controller.fpsLabel;
-
-    final List<List<String>> rows = <List<String>>[
-      if (resolution != null) <String>['分辨率', resolution],
-      if (fps != null) <String>['帧率', '$fps fps'],
-      if (controller.videoCodec != null)
-        <String>['视频编码', _describeCodec(controller.videoCodec)],
-      if (controller.videoDecoder != null)
-        <String>['解码器', controller.videoDecoder!],
-      if (controller.pixelFormat != null)
-        <String>['像素格式', controller.pixelFormat!],
-      if (controller.audioCodec != null)
-        <String>['音频编码', _describeCodec(controller.audioCodec)],
-      if (controller.audioChannels != null)
-        <String>['声道', controller.audioChannels!],
-      if (controller.audioSampleRate != null)
-        <String>[
-          '采样率',
-          '${(controller.audioSampleRate! / 1000).toStringAsFixed(1)} kHz',
-        ],
-    ];
-
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (BuildContext ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                '视频信息',
-                style: Theme.of(ctx)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 12),
-              if (rows.isEmpty)
-                Text('暂无可用的流信息', style: Theme.of(ctx).textTheme.bodyMedium)
-              else
-                for (final List<String> row in rows)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        SizedBox(
-                          width: 76,
-                          child: Text(
-                            row[0],
-                            style: Theme.of(ctx)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: Theme.of(ctx).colorScheme.outline,
-                                ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            row[1],
-                            style: Theme.of(ctx).textTheme.bodyMedium,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------- 子组件
-
-class _PillButton extends StatelessWidget {
-  const _PillButton({required this.label, required this.onTap});
-
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.white24,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 只读信息标签（清晰度）。
-///
-/// 长得像 [_PillButton] 但不可点，所以不做成 InkWell —— 一个点不动的按钮
-/// 比一段普通文字更让人困惑。
-class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: Colors.white12,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white70,
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-    );
-  }
-}
-
-class _GlassBox extends StatelessWidget {
-  const _GlassBox({required this.child, this.width});
-
-  final Widget child;
-  final double? width;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: width,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      decoration: BoxDecoration(
-        color: Colors.black54,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: child,
-    );
-  }
-}
-
-class _ErrorPanel extends StatelessWidget {
-  const _ErrorPanel({required this.message, required this.onRetry});
-
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        margin: const EdgeInsets.all(32),
-        padding: const EdgeInsets.all(20),
-        constraints: const BoxConstraints(maxWidth: 460),
-        decoration: BoxDecoration(
-          color: Colors.black54,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const Icon(Icons.error_outline, color: Colors.white, size: 34),
-            const SizedBox(height: 12),
-            const Text(
-              '播放失败',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              maxLines: 4,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.tonal(onPressed: onRetry, child: const Text('重试')),
-          ],
-        ),
-      ),
-    );
   }
 }

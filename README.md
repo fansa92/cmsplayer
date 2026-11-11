@@ -18,7 +18,7 @@
 | 批量导入 | 从 URL 导入官方源列表、粘贴 JSON 导入、一键导出 JSON |
 | 分类浏览 | 分类导航 + 年代 / 地区 / 排序三维筛选 + 分页 |
 | 搜索 | 单源搜索；多源并发搜索并合并去重，结果卡片标注来源；手动触发（回车或「搜索」按钮） |
-| 详情页 | 多线路切换、多选集、导演 / 演员 / 简介、收藏、续播入口 |
+| 详情页 | 多线路切换、多选集、导演 / 演员 / 简介、收藏、续播入口；有记录时自动切到上次的线路并滚到那一集 |
 | 播放器 | 手势音量 / 亮度 / 进度、倍速、选集、画幅切换、锁屏、自动下一集 |
 | 桌面播放 | 窗口全屏、鼠标移动唤出控制栏、空格 / 方向键 / F 快捷键 |
 | 记忆播放 | 按「源 + 影片 + 线路 + 集数」记住进度，下次进来自动跳转 |
@@ -51,6 +51,17 @@
 鼠标在画面上移动即可唤出控制栏，停止移动 4 秒后自动隐藏。锁屏按钮桌面与
 移动端都有；全屏按钮只在桌面出现（移动端进入播放页即为系统级沉浸式全屏）。
 
+### 主界面快捷键
+
+| 按键 | 作用 |
+| --- | --- |
+| `Ctrl/⌘ + F`、`/` | 跳到搜索页并聚焦输入框 |
+| `Ctrl/⌘ + 1` ~ `5` | 切换到第 N 个页签（首页 / 分类 / 搜索 / 收藏 / 历史） |
+| `Esc` | 返回上一层；已在最外层时收起输入焦点 |
+| `?` | 弹出快捷键说明（桌面端顶栏也有一个键盘图标） |
+
+在输入框里打字时 `/` 与 `?` 不会被当成快捷键。
+
 ---
 
 ## 二、快速开始
@@ -62,8 +73,14 @@ flutter pub get
 # 2. 静态检查（应输出 "No issues found!"）
 dart analyze
 
-# 3. 单元测试（21 个用例，覆盖接口解析 / 播放地址三级结构 / 源规范化 /
-#    在线导入宽容解析 / 分类分层）
+# 3. 单元测试（覆盖接口解析 / 播放地址三级结构 / 源规范化 / 在线导入宽容解析 /
+#    分类分层 / 模型 JSON 往返 / 编码识别 / 播放降级与跨源降级 / 同步合并与墓碑 /
+#    工具函数 / 响应式断点 / 继续观看横条 / WebDAV 与局域网传输 / 同步编排 /
+#    历史·收藏·资源站·同步·浏览·搜索状态 / 页签懒挂载 / 图片缓存 LRU /
+#    海报骨架屏与卡片语义 / 无限滚动去重 / 主题与窄屏布局 /
+#    详情页选集虚拟滚动 / 详情页续播定位 / 快捷键映射 / 深浅主题对比度 /
+#    播放器外观与弹层 / 播放器键盘·手势·自动隐藏 /
+#    播放状态机（地址解析 / 流绑定 / 续播 / 自动下一集 / 记录节流 / 降级链 / 重试）
 flutter test
 
 # 4. 生成平台目录（本仓库已包含，重新生成时用）
@@ -83,7 +100,7 @@ flutter create --project-name cms_player --org com.cmsplayer \
 
 运行调试用 `flutter run -d windows` / `-d macos` / `-d chrome`（Web 端 media_kit 支持有限，仅作 UI 预览）。
 
-> **本仓库当前状态**：`dart analyze` 全绿、`flutter test` 13/13 通过、
+> **本仓库当前状态**：`dart analyze` 全绿、`flutter test` 全部通过、
 > `flutter build bundle --target-platform=windows-x64` 编译成功。
 > 原生链接（CMake / MSVC）尚未在本机执行 —— 开发机未安装 Visual Studio，
 > 装好 VS 后直接 `flutter build windows --release` 即可出 exe，
@@ -185,9 +202,10 @@ lib/
 ├── state/                        ChangeNotifier：Browse / Search / Favorites / History / Source / App
 └── ui/
     ├── pages/                    首页 / 分类 / 搜索 / 收藏 / 历史 / 详情 / 源管理 / 设置
-    ├── player/                   PlayerController + PlayerPage + PlayerControls
-    ├── widgets/                  CachedImage / VodCard / VodGrid / EmptyState / OptionPicker
-    ├── shell/app_shell.dart      自适应导航（窄屏底部栏，宽屏侧边栏）
+    ├── player/                   手势与底栏 player_controls / 外观 player_chrome /
+    │                             弹层 player_sheets / PlayerController + PlayerPage
+    ├── widgets/                  CachedImage / VodCard / VodGrid / PosterSkeleton / OptionPicker
+    ├── shell/                    app_shell 自适应导航 + app_shortcuts 全局快捷键
     └── navigation.dart           统一跳转入口
 ```
 

@@ -16,10 +16,16 @@ class SourceSwitcher extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final SourceStore store = context.watch<SourceStore>();
     final List<VodSource> enabled = store.enabledSources;
+    // 0.42 × 屏宽在 1920 的桌面上是 800px，顶栏会被一个站名撑出很长的
+    // 可点区域；给个 220 的绝对上限，窄屏仍按比例收缩。
+    final double proportional = MediaQuery.sizeOf(context).width * 0.42;
+    final double titleWidth = proportional > 220 ? 220 : proportional;
 
     return InkWell(
       borderRadius: BorderRadius.circular(8),
-      onTap: enabled.length <= 1 ? null : () => _showSheet(context, store, enabled),
+      onTap: enabled.length <= 1
+          ? null
+          : () => _showSheet(context, store, enabled),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
         child: Row(
@@ -32,9 +38,7 @@ class SourceSwitcher extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.sizeOf(context).width * 0.42,
-              ),
+              constraints: BoxConstraints(maxWidth: titleWidth),
               child: Text(
                 source.name,
                 maxLines: 1,
@@ -96,10 +100,12 @@ class SourceSwitcher extends StatelessWidget {
                           ? Theme.of(ctx).colorScheme.primary
                           : null,
                     ),
-                    title: Text(s.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    title: Text(s.name,
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
                     subtitle: s.note.isEmpty
                         ? null
-                        : Text(s.note, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        : Text(s.note,
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
                     onTap: () {
                       Navigator.of(ctx).pop();
                       store.setActive(s);

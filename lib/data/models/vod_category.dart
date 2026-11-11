@@ -37,8 +37,10 @@ class VodCategory {
   /// 结构异常导致筛完为空时也退回原列表，总比什么都不显示强。
   static List<VodCategory> leafOnly(List<VodCategory> categories) {
     if (categories.isEmpty) return categories;
-    final Set<int> parents =
-        categories.map((VodCategory e) => e.parentId).where((int p) => p > 0).toSet();
+    final Set<int> parents = categories
+        .map((VodCategory e) => e.parentId)
+        .where((int p) => p > 0)
+        .toSet();
     if (parents.isEmpty) return categories;
     final List<VodCategory> leaves =
         categories.where((VodCategory e) => !parents.contains(e.id)).toList();

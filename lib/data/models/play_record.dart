@@ -92,7 +92,8 @@ class PlayRecord {
   }
 
   String get episodeLabel {
-    final String ep = episodeName.isEmpty ? '第${episodeIndex + 1}集' : episodeName;
+    final String ep =
+        episodeName.isEmpty ? '第${episodeIndex + 1}集' : episodeName;
     return lineName.isEmpty ? ep : '$lineName · $ep';
   }
 

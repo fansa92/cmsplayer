@@ -64,8 +64,8 @@ class SyncTombstones {
   Future<void> replaceAll(Map<String, Map<String, int>> value) async {
     _by
       ..clear()
-      ..addAll(SyncPayload.pruneTombstones(value, keepFor: keepFor,
-          maxEntries: maxEntries));
+      ..addAll(SyncPayload.pruneTombstones(value,
+          keepFor: keepFor, maxEntries: maxEntries));
     _loaded = true;
     await _persist();
   }
@@ -84,8 +84,10 @@ class SyncTombstones {
       };
 
   void _prune() {
-    final Map<String, Map<String, int>> pruned =
-        SyncPayload.pruneTombstones(_by, keepFor: keepFor, maxEntries: maxEntries);
+    final Map<String, Map<String, int>> pruned = SyncPayload.pruneTombstones(
+        _by,
+        keepFor: keepFor,
+        maxEntries: maxEntries);
     _by
       ..clear()
       ..addAll(pruned);

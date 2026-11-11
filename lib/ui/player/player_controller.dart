@@ -4,8 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:screen_brightness/screen_brightness.dart';
-import 'package:volume_controller/volume_controller.dart';
 
 import '../../core/constants.dart';
 import '../../core/logger.dart';
@@ -13,8 +11,13 @@ import '../../core/utils/text_utils.dart';
 import '../../data/models/play_line.dart';
 import '../../data/models/play_record.dart';
 import '../../data/models/play_task.dart';
+import '../../data/models/vod_source.dart';
+import '../../data/repository/fallback_repository.dart';
 import '../../state/app_state.dart';
 import '../../state/history_store.dart';
+import '../../state/source_store.dart';
+import 'player_controls_binding.dart';
+import 'player_environment.dart';
 
 /// 播放器状态与 media_kit 的桥接层。
 ///
@@ -23,38 +26,64 @@ import '../../state/history_store.dart';
 ///  * 解析播放地址（直链 / 解析接口 / 相对地址补全）；
 ///  * 续播、自动下一集、播放记录节流写入；
 ///  * 手势过程中的音量 / 亮度 / 进度预览。
-class PlayerController extends ChangeNotifier {
+class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   PlayerController({
     required PlayTask task,
     required AppState app,
     required HistoryStore history,
+    required SourceStore sources,
   })  : _app = app,
         _history = history,
+        _sources = sources,
         _task = task {
-    _player = Player();
-    _videoController = VideoController(
-      _player,
-      configuration: VideoControllerConfiguration(
-        enableHardwareAcceleration: app.hardwareDecode,
-      ),
-    );
+    _player = environment.createPlayer();
     _rate = app.defaultRate;
     _bindStreams();
     _openCurrent();
   }
 
+  /// 外部依赖（播放内核 / 系统音量·亮度 / 时钟 / 一次性定时器）。
+  ///
+  /// 生产环境永远是 [PlayerEnvironment.production]；单元测试整体换成内存
+  /// 实现，就能在不加载 libmpv、不触碰平台通道的前提下驱动整条状态机。
+  /// 用 [resetEnvironmentForTest] 还原。
+  @visibleForTesting
+  static PlayerEnvironment environment = PlayerEnvironment.production();
+
+  @visibleForTesting
+  static void resetEnvironmentForTest() {
+    environment = PlayerEnvironment.production();
+  }
+
   final AppState _app;
   final HistoryStore _history;
 
+  /// 资源站列表。跨源降级时要从这里找别的源。
+  final SourceStore _sources;
+
   PlayTask _task;
+  @override
   PlayTask get task => _task;
 
   late final Player _player;
   Player get player => _player;
-  late final VideoController _videoController;
-  VideoController get videoController => _videoController;
 
-  final List<StreamSubscription<Object?>> _subs = <StreamSubscription<Object?>>[];
+  /// 视频输出只在 UI 真正取用时才创建。
+  ///
+  /// [VideoController] 的构造会注册 post-frame 回调并初始化原生纹理，纯逻辑
+  /// 测试（以及无画面的场景）根本不需要它。改成懒创建后，播放状态机可以
+  /// 完全独立于 media_kit_video 运行，生产侧唯一变化只是创建时机从构造
+  /// 推迟到首次读取 —— 而首次读取本来就在播放页 build 里，效果相同。
+  VideoController? _videoController;
+  VideoController get videoController => _videoController ??= VideoController(
+        _player,
+        configuration: VideoControllerConfiguration(
+          enableHardwareAcceleration: _app.hardwareDecode,
+        ),
+      );
+
+  final List<StreamSubscription<Object?>> _subs =
+      <StreamSubscription<Object?>>[];
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -109,33 +138,79 @@ class PlayerController extends ChangeNotifier {
   DateTime _lastHistoryWrite = DateTime.fromMillisecondsSinceEpoch(0);
   bool _resumeApplied = false;
 
+  // ---------------------------------------------------------------- 降级
+
+  /// 同源降级链：备用地址 + 其它线路里的同一集。
+  List<UrlFallback> _fallbackChain = const <UrlFallback>[];
+
+  /// 降级链当前走到第几个。
+  int _fallbackIndex = -1;
+
+  /// 已经失败过的源。跨源降级时排除掉，避免绕回同一个源形成死循环。
+  final Set<String> _triedSourceIds = <String>{};
+
+  /// 已经跨源切换过几次。
+  int _crossSourceCount = 0;
+
+  /// 是否正在跑降级流程。防止两条流程互相抢降级链的位置。
+  bool _recovering = false;
+
+  /// 「正在尝试…」提示。
+  String? _fallbackTrying;
+
+  /// 「已切换到…」提示，几秒后自动消失。
+  String? _fallbackNotice;
+
+  Timer? _noticeTimer;
+
+  /// 正在尝试降级时的提示文案。
+  @override
+  String? get fallbackTrying => _fallbackTrying;
+
+  /// 降级成功后的提示文案。
+  @override
+  String? get fallbackNotice => _fallbackNotice;
+
   // ---------------------------------------------------------------- 状态
 
+  @override
   Duration get position => _seeking ? _seekTarget : _position;
   Duration get rawPosition => _position;
+  @override
   Duration get duration => _duration;
+  @override
   bool get playing => _playing;
+  @override
   bool get buffering => _buffering;
   bool get completed => _completed;
+  @override
   String? get error => _error;
+  @override
   bool get starting => _starting;
+  @override
   double get rate => _rate;
   double get volume => _volume;
+  @override
   bool get locked => _locked;
   BoxFit get fit => _fit;
+  @override
   bool get seeking => _seeking;
 
+  @override
   double get positionRatio {
     if (_duration.inMilliseconds <= 0) return 0;
-    return (_position.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0);
+    return (_position.inMilliseconds / _duration.inMilliseconds)
+        .clamp(0.0, 1.0);
   }
 
+  @override
   double get seekRatio {
     if (_duration.inMilliseconds <= 0) return 0;
     return (_seekTarget.inMilliseconds / _duration.inMilliseconds)
         .clamp(0.0, 1.0);
   }
 
+  @override
   String get fitLabel {
     switch (_fit) {
       case BoxFit.cover:
@@ -152,11 +227,17 @@ class PlayerController extends ChangeNotifier {
   int? get videoWidth => _videoWidth;
   int? get videoHeight => _videoHeight;
   double? get videoFps => _videoFps;
+  @override
   String? get videoCodec => _videoCodec;
+  @override
   String? get videoDecoder => _videoDecoder;
+  @override
   String? get pixelFormat => _pixelFormat;
+  @override
   String? get audioCodec => _audioCodec;
+  @override
   String? get audioChannels => _audioChannels;
+  @override
   int? get audioSampleRate => _audioSampleRate;
 
   /// 清晰度，例如 `1920x1080`。
@@ -164,6 +245,7 @@ class PlayerController extends ChangeNotifier {
   /// 优先用 stream 的 width / height：那是解码后的实际尺寸；track 上那对
   /// demux-w / demux-h 是容器里标的标称值，遇到旋转 90 度的竖屏视频会和
   /// 实际显示的宽高对不上。
+  @override
   String? get resolutionLabel {
     final int? w = _videoWidth;
     final int? h = _videoHeight;
@@ -172,6 +254,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// 帧率，去掉无意义的小数尾巴（23.976 保留，30.000 变成 30）。
+  @override
   String? get fpsLabel {
     final double? fps = _videoFps;
     if (fps == null || fps <= 0) return null;
@@ -253,9 +336,9 @@ class PlayerController extends ChangeNotifier {
     _subs.add(_player.stream.error.listen((String e) {
       AppLog.e('Player', 'media error: $e');
       if (_disposed) return;
-      _error = e.isEmpty ? '播放失败' : e;
-      _starting = false;
-      _emit();
+      // 不立刻报错：先沿降级链试一遍（备用地址 → 其它线路 → 换源），
+      // 都试过了才把错误面板亮出来。
+      unawaited(_handleFailure(e.isEmpty ? '播放失败' : e));
     }));
 
     // 视频信息。这几个流只在文件打开、探测完成后各触发一次，
@@ -326,12 +409,14 @@ class PlayerController extends ChangeNotifier {
 
   // ---------------------------------------------------------------- 打开
 
-  /// 解析出最终交给 libmpv 的地址。
-  String? resolvePlayUrl(PlayEpisode episode) {
-    final String raw = episode.url.trim();
-    if (raw.isEmpty) return null;
+  /// 把原始地址解析成最终交给 libmpv 的地址。
+  ///
+  /// 相对地址按接口地址补全；不是直链时按源的「解析接口」拼接。
+  String? resolveRawUrl(String raw) {
+    final String text = raw.trim();
+    if (text.isEmpty) return null;
 
-    final String absolute = resolveUrl(raw, base: _task.source.api) ?? raw;
+    final String absolute = resolveUrl(text, base: _task.source.api) ?? text;
     if (isDirectPlayable(absolute)) return absolute;
 
     final String parse = _task.source.parseApi.trim();
@@ -342,7 +427,14 @@ class PlayerController extends ChangeNotifier {
         : '$parse$encoded';
   }
 
+  /// 解析当前集的播放地址。
+  String? resolvePlayUrl(PlayEpisode episode) => resolveRawUrl(episode.url);
+
+  /// 打开当前任务，并重建降级链。
   Future<void> _openCurrent() async {
+    _fallbackChain = FallbackResolver.sameSource(_task);
+    _fallbackIndex = -1;
+
     final PlayEpisode? episode = _task.episode;
     if (episode == null) {
       _error = '没有可播放的地址';
@@ -351,7 +443,7 @@ class PlayerController extends ChangeNotifier {
       return;
     }
 
-    final String? url = resolvePlayUrl(episode);
+    final String? url = resolveRawUrl(episode.url);
     if (url == null) {
       _error = '该集没有有效的播放地址';
       _starting = false;
@@ -359,6 +451,15 @@ class PlayerController extends ChangeNotifier {
       return;
     }
 
+    final bool opened = await _openUrl(url);
+    if (!opened) {
+      // 打开时直接抛了异常：降级链照样走一遍。
+      await _handleFailure(_error ?? '无法打开视频');
+    }
+  }
+
+  /// 打开一个地址。返回 false 表示 `open` 阶段直接抛了异常。
+  Future<bool> _openUrl(String url) async {
     _error = null;
     _starting = true;
     _startupTimer?.cancel();
@@ -380,19 +481,123 @@ class PlayerController extends ChangeNotifier {
       // 正常情况下 playing / duration 流会立刻清掉 _starting；
       // 这里再挂一道兜底，防止流不触发时控制栏被永久遮住。
       _startupTimer?.cancel();
-      _startupTimer = Timer(K.startupTimeout, () {
+      _startupTimer = environment.createTimer(K.startupTimeout, () {
         if (_starting) {
           _clearStarting('timeout');
           _emit();
         }
       });
+      return true;
     } on Object catch (e) {
       AppLog.e('Player', 'open failed: $e');
-      if (_disposed) return;
+      if (_disposed) return false;
       _error = '无法打开视频：$e';
       _starting = false;
       _emit();
+      return false;
     }
+  }
+
+  // ---------------------------------------------------------------- 降级
+
+  /// 播放失败后的降级处理。
+  ///
+  /// 依次尝试：同源备用地址 → 同源其它线路 → 跨源同名影片。
+  /// 全部试完仍然失败，才把错误显示给用户。
+  ///
+  /// [_recovering] 保证同一时刻只有一条降级流程在跑：`_openUrl` 失败时
+  /// 也会走这里，不加锁的话两条流程会互相抢降级链的位置。
+  Future<void> _handleFailure(String message) async {
+    if (_disposed || _recovering) return;
+    _recovering = true;
+    try {
+      String lastError = message;
+      while (true) {
+        final FallbackTarget? next = await _nextFallback();
+        if (next == null) {
+          _fallbackTrying = null;
+          _error = lastError;
+          _starting = false;
+          _emit();
+          return;
+        }
+        final bool opened = await _applyFallback(next);
+        if (opened) {
+          // 打开成功，等后续的 error 流；没再报错就算救回来了。
+          _fallbackTrying = null;
+          _emit();
+          return;
+        }
+        lastError = '无法打开视频（${next.label}）';
+      }
+    } finally {
+      _recovering = false;
+    }
+  }
+
+  /// 取下一个降级候选。没有了返回 null。
+  Future<FallbackTarget?> _nextFallback() async {
+    // 1) 同源：备用地址 + 其它线路里的同一集。
+    if (_fallbackIndex + 1 < _fallbackChain.length) {
+      _fallbackIndex++;
+      final UrlFallback target = _fallbackChain[_fallbackIndex];
+      _fallbackTrying = '正在尝试${target.label}';
+      _emit();
+      return target;
+    }
+
+    // 2) 跨源：到别的资源站里找同名影片。
+    if (_crossSourceCount >= K.maxCrossSourceFallbacks) return null;
+    final List<VodSource> candidates = _sources.enabledSources
+        .where(
+          (VodSource s) =>
+              s.id != _task.source.id && !_triedSourceIds.contains(s.id),
+        )
+        .toList();
+    if (candidates.isEmpty) return null;
+
+    _fallbackTrying = '正在查找其它资源站…';
+    _emit();
+    final List<SourceFallback> found =
+        await FallbackResolver.crossSource(_task, candidates);
+    if (found.isEmpty) return null;
+
+    _crossSourceCount++;
+    _triedSourceIds.add(_task.source.id);
+    return found.first;
+  }
+
+  /// 应用一个降级候选并打开。返回 false 表示打开失败。
+  Future<bool> _applyFallback(FallbackTarget target) async {
+    if (target is SourceFallback) {
+      _task = _task.copyWith(
+        source: target.source,
+        item: target.item,
+        lineIndex: target.lineIndex,
+        episodeIndex: target.episodeIndex,
+      );
+      // 新源有自己的线路与备用地址，同源降级链要按新源重建。
+      _fallbackChain = FallbackResolver.sameSource(_task);
+      _fallbackIndex = -1;
+      _setNotice('已切换到「${target.label}」');
+      _emit();
+    }
+
+    final String? url = resolveRawUrl(target.url);
+    if (url == null) return false;
+    return _openUrl(url);
+  }
+
+  /// 设置一次性提示，几秒后自动消失。
+  void _setNotice(String text) {
+    _fallbackNotice = text;
+    _noticeTimer?.cancel();
+    _noticeTimer = environment.createTimer(K.fallbackNoticeDuration, () {
+      if (_disposed) return;
+      _fallbackNotice = null;
+      _emit();
+    });
+    _emit();
   }
 
   /// 首次拿到时长时应用续播位置。
@@ -413,8 +618,7 @@ class PlayerController extends ChangeNotifier {
     }
     final int pos = record.positionMs;
     if (pos <= K.resumeSeekThreshold.inMilliseconds) return;
-    if (record.durationMs > 0 &&
-        pos / record.durationMs >= K.finishRatio) {
+    if (record.durationMs > 0 && pos / record.durationMs >= K.finishRatio) {
       return;
     }
     _player.seek(Duration(milliseconds: pos));
@@ -430,8 +634,10 @@ class PlayerController extends ChangeNotifier {
 
   // ---------------------------------------------------------------- 控制
 
+  @override
   Future<void> togglePlay() => _player.playOrPause();
 
+  @override
   Future<void> seek(Duration target) async {
     if (_duration.inMilliseconds <= 0) return;
     final int maxMs = _duration.inMilliseconds;
@@ -439,9 +645,10 @@ class PlayerController extends ChangeNotifier {
     await _player.seek(Duration(milliseconds: ms));
   }
 
-  Future<void> seekBy(Duration delta) =>
-      seek(_position + delta);
+  @override
+  Future<void> seekBy(Duration delta) => seek(_position + delta);
 
+  @override
   Future<void> setRate(double value) async {
     _rate = value;
     _emit();
@@ -455,13 +662,14 @@ class PlayerController extends ChangeNotifier {
   /// 而不是 media_kit 的播放器音量 —— 后者会和手势读数对不上。
   ///
   /// 返回应用后的音量（0..100），平台不支持时返回 null，调用方据此不显示提示。
+  @override
   Future<double?> stepVolume(double deltaPercent) async {
     try {
       final double base = _systemVolume >= 0
           ? _systemVolume / 100
-          : await VolumeController.instance.getVolume();
+          : await environment.readVolume();
       final double next = (base + deltaPercent / 100).clamp(0.0, 1.0);
-      await VolumeController.instance.setVolume(next);
+      await environment.writeVolume(next);
       _systemVolume = next * 100;
       _emit();
       return _systemVolume;
@@ -471,6 +679,7 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  @override
   Future<void> cycleFit() async {
     switch (_fit) {
       case BoxFit.contain:
@@ -485,15 +694,19 @@ class PlayerController extends ChangeNotifier {
     _emit();
   }
 
+  @override
   void toggleLock() {
     _locked = !_locked;
     _emit();
   }
 
+  @override
   Future<void> next() => _switchTo(_task.lineIndex, _task.episodeIndex + 1);
 
+  @override
   Future<void> previous() => _switchTo(_task.lineIndex, _task.episodeIndex - 1);
 
+  @override
   Future<void> selectEpisode(int lineIndex, int episodeIndex) =>
       _switchTo(lineIndex, episodeIndex);
 
@@ -508,29 +721,39 @@ class PlayerController extends ChangeNotifier {
     await _openCurrent();
   }
 
-  Future<void> retry() => _openCurrent();
+  /// 手动重试。清掉降级状态，从头再走一遍。
+  @override
+  Future<void> retry() async {
+    _triedSourceIds.clear();
+    _crossSourceCount = 0;
+    _fallbackNotice = null;
+    _fallbackTrying = null;
+    await _openCurrent();
+  }
 
   // ---------------------------------------------------------------- 手势
 
+  @override
   void startSeek() {
     _seeking = true;
     _seekTarget = _position;
     _emit();
   }
 
+  @override
   void updateSeek(Duration delta) {
     if (!_seeking) return;
     if (_duration.inMilliseconds <= 0) return;
     // delta 是"相对上一帧"的增量，必须累加到上一次的目标上。
     // 之前写成 `_position + delta`，整段拖动只按最后一下的幅度生效，
     // 拖满屏进度条也几乎不动。
-    final int ms = (_seekTarget + delta)
-        .inMilliseconds
-        .clamp(0, _duration.inMilliseconds);
+    final int ms =
+        (_seekTarget + delta).inMilliseconds.clamp(0, _duration.inMilliseconds);
     _seekTarget = Duration(milliseconds: ms);
     _emit();
   }
 
+  @override
   void commitSeek() async {
     if (!_seeking) return;
     final Duration target = _seekTarget;
@@ -539,22 +762,24 @@ class PlayerController extends ChangeNotifier {
     await seek(target);
   }
 
+  @override
   void cancelSeek() {
     _seeking = false;
     _emit();
   }
 
   /// [isVolume] 为 true 表示调右侧音量，false 表示调左侧亮度。
+  @override
   Future<void> startVerticalGesture({required bool isVolume}) async {
     if (_adjustingVolume || _adjustingBrightness) return;
     try {
       if (isVolume) {
-        final double v = await VolumeController.instance.getVolume();
+        final double v = await environment.readVolume();
         _gestureVolume = v;
         _systemVolume = v * 100; // 与键盘步进共享读数
         _adjustingVolume = true;
       } else {
-        _gestureBrightness = await ScreenBrightness.instance.application;
+        _gestureBrightness = await environment.readBrightness();
         _adjustingBrightness = true;
       }
     } on Object catch (e) {
@@ -564,11 +789,12 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// [delta] 是自上一帧以来的位移（归一化到 0..1），必须累加到当前值上。
+  @override
   Future<void> updateVerticalGesture(double delta) async {
     if (_adjustingVolume) {
       _gestureVolume = (_gestureVolume + delta).clamp(0.0, 1.0);
       try {
-        await VolumeController.instance.setVolume(_gestureVolume);
+        await environment.writeVolume(_gestureVolume);
       } on Object {
         // 平台不支持时静默忽略。
       }
@@ -576,9 +802,7 @@ class PlayerController extends ChangeNotifier {
     } else if (_adjustingBrightness) {
       _gestureBrightness = (_gestureBrightness + delta).clamp(0.0, 1.0);
       try {
-        await ScreenBrightness.instance.setApplicationScreenBrightness(
-          _gestureBrightness,
-        );
+        await environment.writeBrightness(_gestureBrightness);
       } on Object {
         // 平台不支持时静默忽略。
       }
@@ -586,15 +810,20 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  @override
   Future<void> endVerticalGesture() async {
     _adjustingVolume = false;
     _adjustingBrightness = false;
     _emit();
   }
 
+  @override
   bool get adjustingVolume => _adjustingVolume;
+  @override
   bool get adjustingBrightness => _adjustingBrightness;
+  @override
   double get gestureVolume => _gestureVolume;
+  @override
   double get gestureBrightness => _gestureBrightness;
 
   /// 系统音量（0..100），-1 表示尚未读到过。
@@ -604,11 +833,10 @@ class PlayerController extends ChangeNotifier {
 
   void _maybeWriteHistory() {
     if (_disposed) return;
-    if (_duration.inMilliseconds <=
-        K.minResumeSource.inMilliseconds) {
+    if (_duration.inMilliseconds <= K.minResumeSource.inMilliseconds) {
       return;
     }
-    final DateTime now = DateTime.now();
+    final DateTime now = environment.now();
     if (now.difference(_lastHistoryWrite) < K.historyThrottle) return;
     _lastHistoryWrite = now;
     _writeHistory();
@@ -621,9 +849,7 @@ class PlayerController extends ChangeNotifier {
     if (episode == null || line == null) return;
 
     final int durationMs = _duration.inMilliseconds;
-    final int positionMs = finished
-        ? durationMs
-        : _position.inMilliseconds;
+    final int positionMs = finished ? durationMs : _position.inMilliseconds;
     if (!force && durationMs <= 0) return;
 
     _history.upsert(
@@ -641,9 +867,9 @@ class PlayerController extends ChangeNotifier {
         episodeName: episode.name,
         positionMs: positionMs,
         durationMs: durationMs,
-        finished:
-            finished || (durationMs > 0 && positionMs / durationMs >= K.finishRatio),
-        updatedAt: DateTime.now(),
+        finished: finished ||
+            (durationMs > 0 && positionMs / durationMs >= K.finishRatio),
+        updatedAt: environment.now(),
       ),
     );
   }
@@ -652,7 +878,7 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> restoreBrightness() async {
     try {
-      await ScreenBrightness.instance.resetApplicationScreenBrightness();
+      await environment.resetBrightness();
     } on Object {
       // 忽略。
     }
@@ -660,9 +886,15 @@ class PlayerController extends ChangeNotifier {
 
   @override
   void dispose() {
+    // 页面在退出过程中可能重复触发 dispose（例如播放器页被 pop 两次，或
+    // 外层 rebuild 时又走了一遍销毁）。ChangeNotifier 二次 dispose 会在
+    // debug 下断言，且会重复写历史，所以这里显式做幂等。
+    if (_disposed) return;
     _disposed = true;
     _startupTimer?.cancel();
     _startupTimer = null;
+    _noticeTimer?.cancel();
+    _noticeTimer = null;
     for (final StreamSubscription<Object?> sub in _subs) {
       unawaited(sub.cancel());
     }

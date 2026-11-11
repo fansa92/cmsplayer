@@ -18,9 +18,8 @@ class WebDavTransport implements SyncTransport {
     this.password = '',
     String remotePath = K.defaultWebDavPath,
     http.Client? client,
-  })  : remotePath = remotePath.trim().isEmpty
-            ? K.defaultWebDavPath
-            : remotePath.trim(),
+  })  : remotePath =
+            remotePath.trim().isEmpty ? K.defaultWebDavPath : remotePath.trim(),
         _client = client ?? http.Client();
 
   final String baseUrl;
@@ -39,8 +38,8 @@ class WebDavTransport implements SyncTransport {
   Uri get fileUri {
     final String base = baseUrl.trim();
     if (base.isEmpty) throw const SyncException('还没填写 WebDAV 地址');
-    final Uri baseUri = Uri.tryParse(base.endsWith('/') ? base : '$base/')
-        ?? (throw SyncException('WebDAV 地址不是合法 URL：$base'));
+    final Uri baseUri = Uri.tryParse(base.endsWith('/') ? base : '$base/') ??
+        (throw SyncException('WebDAV 地址不是合法 URL：$base'));
     if (!baseUri.isScheme('http') && !baseUri.isScheme('https')) {
       throw SyncException('WebDAV 地址必须是 http(s)：$base');
     }
@@ -63,7 +62,11 @@ class WebDavTransport implements SyncTransport {
 
   @override
   Future<SyncPayload?> download() async {
-    final http.Response r = await _send('GET', fileUri);
+    // 404 在这里是「远端还没有同步文件」的正常状态，必须让 download
+    // 自己判。走 _send 默认的统一检查会先抛「路径不存在」，
+    // 结果就是首次同步永远失败。
+    final http.Response r =
+        await _send('GET', fileUri, throwOnHttpError: false);
     if (r.statusCode == 404) return null;
     _ensureOk(r);
     final String text = utf8.decode(r.bodyBytes, allowMalformed: true);
@@ -77,8 +80,7 @@ class WebDavTransport implements SyncTransport {
   @override
   Future<SyncPayload?> upload(SyncPayload payload) async {
     await _ensureDirs();
-    final http.Response r =
-        await _send('PUT', fileUri, body: payload.encode());
+    final http.Response r = await _send('PUT', fileUri, body: payload.encode());
     _ensureOk(r);
     return null;
   }
@@ -90,7 +92,10 @@ class WebDavTransport implements SyncTransport {
           fileUri.pathSegments.where((String s) => s.isNotEmpty).toList()
             ..removeLast(),
     );
-    final http.Response r = await _send('PROPFIND', dir, depth: '0');
+    // 自己判状态码：走 _send 默认的统一检查会把 401/404 先转成通用文案，
+    // test() 里针对连通性测试的提示就永远到不了界面。
+    final http.Response r =
+        await _send('PROPFIND', dir, depth: '0', throwOnHttpError: false);
     if (r.statusCode == 401 || r.statusCode == 403) {
       throw const SyncException('账号或密码不对（HTTP 401）');
     }
@@ -119,8 +124,8 @@ class WebDavTransport implements SyncTransport {
     for (final String s in segs) {
       prefix = '$prefix/${Uri.encodeComponent(s)}';
       try {
-        final http.Response r =
-            await _send('MKCOL', Uri.parse('$prefix/'), throwOnHttpError: false);
+        final http.Response r = await _send('MKCOL', Uri.parse('$prefix/'),
+            throwOnHttpError: false);
         // 201 = 刚建好，405 = 早就存在，301/401 交给后续请求去报错。
         if (r.statusCode == 201 || r.statusCode == 405) continue;
         AppLog.w('WebDav', 'MKCOL $prefix -> ${r.statusCode}');
@@ -146,9 +151,7 @@ class WebDavTransport implements SyncTransport {
 
     final http.StreamedResponse streamed;
     try {
-      streamed = await _client
-          .send(request)
-          .timeout(K.syncTimeout);
+      streamed = await _client.send(request).timeout(K.syncTimeout);
     } on Object catch (e) {
       throw SyncException('连不上 WebDAV：$e', cause: e);
     }

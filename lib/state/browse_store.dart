@@ -49,7 +49,11 @@ class BrowseStore extends ChangeNotifier {
   String? get error => _error;
 
   bool get hasFilter =>
-      _typeId > 0 || _year.isNotEmpty || _area.isNotEmpty || _lang.isNotEmpty || _sortBy.isNotEmpty;
+      _typeId > 0 ||
+      _year.isNotEmpty ||
+      _area.isNotEmpty ||
+      _lang.isNotEmpty ||
+      _sortBy.isNotEmpty;
 
   bool get canLoadMore => _pageNo < _pageCount;
 
@@ -122,8 +126,7 @@ class BrowseStore extends ChangeNotifier {
       // 列表响应确实没带 class 时才补一次分类请求。
       if (_categories.isEmpty) {
         try {
-          _categories =
-              await VodRepository.instance.refreshCategories(source);
+          _categories = await VodRepository.instance.refreshCategories(source);
           _emit();
         } on Object catch (e) {
           AppLog.d('Browse', 'categories failed: $e');

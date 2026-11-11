@@ -12,7 +12,8 @@ import '../../core/utils/text_utils.dart';
 ///   "note": "备注",
 ///   "referer": "https://example.com/",
 ///   "userAgent": "Mozilla/5.0 ...",
-///   "parseApi": "https://jx.example.com/?url="
+///   "parseApi": "https://jx.example.com/?url=",
+///   "charset": "gbk"
 /// }
 /// ```
 class VodSource {
@@ -24,6 +25,7 @@ class VodSource {
     this.parseApi = '',
     this.referer = '',
     this.userAgent = '',
+    this.charset = '',
     this.enabled = true,
     this.sort = 0,
     required this.createdAt,
@@ -43,6 +45,11 @@ class VodSource {
   /// 可选自定义 UA。
   final String userAgent;
 
+  /// 可选字符集（如 `gbk`）。留空表示自动探测。
+  ///
+  /// 老资源站常返回 GBK / GB2312，填上这个可以省掉一次探测误判。
+  final String charset;
+
   final bool enabled;
   final int sort;
   final DateTime createdAt;
@@ -59,6 +66,7 @@ class VodSource {
       parseApi: strOf(json['parseApi'] ?? json['jx']),
       referer: strOf(json['referer']),
       userAgent: strOf(json['userAgent'] ?? json['ua']),
+      charset: strOf(json['charset'] ?? json['encoding']),
       enabled: enabledRaw == null
           ? true
           : (enabledRaw == true || enabledRaw == 1 || enabledRaw == '1'),
@@ -78,6 +86,7 @@ class VodSource {
         'parseApi': parseApi,
         'referer': referer,
         'userAgent': userAgent,
+        'charset': charset,
         'enabled': enabled,
         'sort': sort,
         'createdAt': createdAt.toIso8601String(),
@@ -101,9 +110,8 @@ class VodSource {
   /// 请求头。Referer 为空时用源站兜底，很多资源站会拒绝无 Referer 的请求。
   Map<String, String> get headers {
     final String ua = userAgent.isEmpty ? K.defaultUserAgent : userAgent;
-    final String ref = referer.isNotEmpty
-        ? referer
-        : (origin.isEmpty ? '' : '$origin/');
+    final String ref =
+        referer.isNotEmpty ? referer : (origin.isEmpty ? '' : '$origin/');
     return <String, String>{
       'User-Agent': ua,
       if (ref.isNotEmpty) 'Referer': ref,
@@ -118,6 +126,7 @@ class VodSource {
     String? parseApi,
     String? referer,
     String? userAgent,
+    String? charset,
     bool? enabled,
     int? sort,
   }) =>
@@ -129,6 +138,7 @@ class VodSource {
         parseApi: parseApi ?? this.parseApi,
         referer: referer ?? this.referer,
         userAgent: userAgent ?? this.userAgent,
+        charset: charset ?? this.charset,
         enabled: enabled ?? this.enabled,
         sort: sort ?? this.sort,
         createdAt: createdAt,

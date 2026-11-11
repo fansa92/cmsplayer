@@ -43,12 +43,20 @@ class PlayTask {
     return '${l.name} · ${e.name}';
   }
 
-  bool get hasNext => episodeIndex >= 0 && episodeIndex < (line?.episodes.length ?? 0) - 1;
+  bool get hasNext =>
+      episodeIndex >= 0 && episodeIndex < (line?.episodes.length ?? 0) - 1;
   bool get hasPrev => episodeIndex > 0;
 
-  PlayTask copyWith({int? lineIndex, int? episodeIndex}) => PlayTask(
-        source: source,
-        item: item,
+  /// 复制一份，允许换源 / 换影片（跨源降级时用）。
+  PlayTask copyWith({
+    VodSource? source,
+    VodItem? item,
+    int? lineIndex,
+    int? episodeIndex,
+  }) =>
+      PlayTask(
+        source: source ?? this.source,
+        item: item ?? this.item,
         lineIndex: lineIndex ?? this.lineIndex,
         episodeIndex: episodeIndex ?? this.episodeIndex,
       );

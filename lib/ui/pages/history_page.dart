@@ -49,8 +49,8 @@ class HistoryPage extends StatelessWidget {
             itemBuilder: (BuildContext context, int index) {
               final PlayRecord record = records[index];
               final VodSource? source = _sourceOf(sourceStore, record.sourceId);
-              final Map<String, String> headers = source?.headers ??
-                  const <String, String>{};
+              final Map<String, String> headers =
+                  source?.headers ?? const <String, String>{};
 
               return Dismissible(
                 key: ValueKey<String>(record.key),
@@ -71,7 +71,8 @@ class HistoryPage extends StatelessWidget {
                 child: HistoryCard(
                   pic: record.vodPic,
                   title: record.vodName,
-                  subtitle: '${record.episodeLabel} · ${formatRelativeTime(record.updatedAt)}',
+                  subtitle:
+                      '${record.episodeLabel} · ${formatRelativeTime(record.updatedAt)}',
                   progressLabel: record.progressLabel,
                   progress: record.progress,
                   headers: headers,

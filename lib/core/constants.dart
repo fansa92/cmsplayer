@@ -24,7 +24,16 @@ class K {
   static const int maxCacheEntries = 120;
 
   // ---------------- 播放 ----------------
-  static const List<double> playRates = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0];
+  static const List<double> playRates = <double>[
+    0.5,
+    0.75,
+    1.0,
+    1.25,
+    1.5,
+    1.75,
+    2.0,
+    3.0
+  ];
 
   /// 少于该时长不写入续播进度，避免"秒进秒出"污染记录。
   static const Duration minResumeSource = Duration(seconds: 20);
@@ -44,6 +53,17 @@ class K {
 
   /// 播放记录写盘节流间隔。
   static const Duration historyThrottle = Duration(seconds: 8);
+
+  // ---------------- 播放降级 ----------------
+
+  /// 播放失败时最多跨源切换几次。
+  ///
+  /// 跨源切换会换整部影片的来源，每次都要重新搜一轮，站多了会很慢；
+  /// 而且切得越多越容易偏离用户原本想看的那部片子，所以要卡住。
+  static const int maxCrossSourceFallbacks = 2;
+
+  /// 降级提示在界面上停留的时长。
+  static const Duration fallbackNoticeDuration = Duration(seconds: 4);
 
   // ---------------- 存储 ----------------
   static const String boxSources = 'sources.json';
@@ -98,15 +118,44 @@ class K {
 
   /// 分类筛选项：年代（macCMS 的 `year` 参数）。
   static const List<String> yearOptions = <String>[
-    '2026', '2025', '2024', '2023', '2022', '2021', '2020',
-    '2019', '2018', '2017', '2016', '2015', '2014', '2013',
-    '2012', '2011', '2010', '2000-2009', '1990-1999', '更早',
+    '2026',
+    '2025',
+    '2024',
+    '2023',
+    '2022',
+    '2021',
+    '2020',
+    '2019',
+    '2018',
+    '2017',
+    '2016',
+    '2015',
+    '2014',
+    '2013',
+    '2012',
+    '2011',
+    '2010',
+    '2000-2009',
+    '1990-1999',
+    '更早',
   ];
 
   /// 分类筛选项：地区（macCMS 的 `area` 参数）。
   static const List<String> areaOptions = <String>[
-    '大陆', '香港', '台湾', '美国', '韩国', '日本', '泰国',
-    '印度', '英国', '法国', '德国', '西班牙', '意大利', '其他',
+    '大陆',
+    '香港',
+    '台湾',
+    '美国',
+    '韩国',
+    '日本',
+    '泰国',
+    '印度',
+    '英国',
+    '法国',
+    '德国',
+    '西班牙',
+    '意大利',
+    '其他',
   ];
 
   /// 内置示例源。仅用于首次启动演示，用户可自行增删。

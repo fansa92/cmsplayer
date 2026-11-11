@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../../core/errors.dart';
 import '../../core/logger.dart';
+import '../../core/utils/encoding.dart';
 import '../models/vod_source.dart';
 
 /// JSON 源列表导入工具。
@@ -24,7 +25,10 @@ class SourceImporter {
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
         throw VodException('HTTP ${resp.statusCode}', url: url);
       }
-      return utf8.decode(resp.bodyBytes, allowMalformed: true);
+      return ResponseDecoder.decode(
+        resp.bodyBytes,
+        contentType: resp.headers['content-type'],
+      );
     } on VodException {
       rethrow;
     } on Object catch (e) {
@@ -47,7 +51,8 @@ class SourceImporter {
     final List<Map<String, dynamic>> entries = <Map<String, dynamic>>[];
 
     if (data is List) {
-      entries.addAll(data.whereType<Map>().map((Map e) => e.cast<String, dynamic>()));
+      entries.addAll(
+          data.whereType<Map>().map((Map e) => e.cast<String, dynamic>()));
     } else if (data is Map) {
       final Map<String, dynamic> map = data.cast<String, dynamic>();
       final Object? nested = map['sources'] ?? map['list'] ?? map['data'];
@@ -182,6 +187,7 @@ class SourceImporter {
               if (s.parseApi.isNotEmpty) 'parseApi': s.parseApi,
               if (s.referer.isNotEmpty) 'referer': s.referer,
               if (s.userAgent.isNotEmpty) 'userAgent': s.userAgent,
+              if (s.charset.isNotEmpty) 'charset': s.charset,
               'enabled': s.enabled,
             })
         .toList();

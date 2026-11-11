@@ -45,8 +45,7 @@ void main() {
   group('播放地址解析', () {
     test(r'解析 $$$ / # / $ 三级结构', () {
       const String from = r'm3u8$$$dbm3u8';
-      const String url =
-          '第01集\$https://a.com/1.m3u8#第02集\$https://a.com/2.m3u8'
+      const String url = '第01集\$https://a.com/1.m3u8#第02集\$https://a.com/2.m3u8'
           '\$\$\$'
           '第01集\$https://b.com/1.m3u8\$https://c.com/1.m3u8';
 
@@ -134,7 +133,8 @@ void main() {
         'https://cdn.a.com/x.m3u8',
       );
       expect(
-        resolveUrl('/vod/1.m3u8', base: 'https://site.com/api.php/provide/vod/'),
+        resolveUrl('/vod/1.m3u8',
+            base: 'https://site.com/api.php/provide/vod/'),
         'https://site.com/vod/1.m3u8',
       );
     });
@@ -303,8 +303,14 @@ void main() {
       await api.query();
 
       final Map<String, String> q = client.lastUri!.queryParameters;
-      for (final String k
-          in <String>['year', 'area', 'lang', 'by', 'wd', 't']) {
+      for (final String k in <String>[
+        'year',
+        'area',
+        'lang',
+        'by',
+        'wd',
+        't'
+      ]) {
         expect(q.containsKey(k), isFalse, reason: '$k 不应出现在请求里');
       }
     });

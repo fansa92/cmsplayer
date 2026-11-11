@@ -9,6 +9,7 @@ import '../../core/utils/responsive.dart';
 import '../../data/models/play_task.dart';
 import '../../state/app_state.dart';
 import '../../state/history_store.dart';
+import '../../state/source_store.dart';
 import 'player_controls.dart';
 import 'player_controller.dart';
 
@@ -33,6 +34,7 @@ class _PlayerPageState extends State<PlayerPage> {
       task: widget.task,
       app: context.read<AppState>(),
       history: context.read<HistoryStore>(),
+      sources: context.read<SourceStore>(),
     );
     _enterPlaybackUi();
   }

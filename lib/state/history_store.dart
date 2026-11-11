@@ -53,13 +53,15 @@ class HistoryStore extends ChangeNotifier {
 
   /// 覆盖式写入。调用方负责节流，避免播放中高频落盘。
   Future<void> upsert(PlayRecord record) async {
-    final int index = _records.indexWhere((PlayRecord e) => e.key == record.key);
+    final int index =
+        _records.indexWhere((PlayRecord e) => e.key == record.key);
     if (index >= 0) {
       _records[index] = record;
     } else {
       _records.insert(0, record);
     }
-    _records.sort((PlayRecord a, PlayRecord b) => b.updatedAt.compareTo(a.updatedAt));
+    _records.sort(
+        (PlayRecord a, PlayRecord b) => b.updatedAt.compareTo(a.updatedAt));
     await _save();
     _emit();
   }

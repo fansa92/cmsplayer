@@ -150,9 +150,8 @@ class VodItem {
       final String raw = lines[i].trim();
       if (raw.isEmpty) continue;
 
-      final String lineName = (i < froms.length && froms[i].isNotEmpty)
-          ? froms[i]
-          : '线路${i + 1}';
+      final String lineName =
+          (i < froms.length && froms[i].isNotEmpty) ? froms[i] : '线路${i + 1}';
 
       final List<PlayEpisode> episodes = <PlayEpisode>[];
       for (final String segment in raw.split('#')) {

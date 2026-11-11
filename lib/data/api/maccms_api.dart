@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../../core/errors.dart';
 import '../../core/logger.dart';
+import '../../core/utils/encoding.dart';
 import '../models/paged_result.dart';
 import '../models/vod_category.dart';
 import '../models/vod_item.dart';
@@ -26,8 +27,7 @@ import '../models/vod_source.dart';
 /// | `by` | 排序：`time` / `hits` / `score` / `input`（部分源不响应，见下） |
 /// | `h` / `m` | 24 小时 / 本月热播 |
 class MacCmsApi {
-  MacCmsApi(this.source, {http.Client? client})
-      : _client = client ?? _shared;
+  MacCmsApi(this.source, {http.Client? client}) : _client = client ?? _shared;
 
   static final http.Client _shared = http.Client();
 
@@ -58,8 +58,7 @@ class MacCmsApi {
   }
 
   Future<VodPage> _fetch(Map<String, String> params) async {
-    final String pageSize =
-        params['pagesize'] ?? params['limit'] ?? '20';
+    final String pageSize = params['pagesize'] ?? params['limit'] ?? '20';
     final Map<String, String> finalParams = <String, String>{
       ...params,
       'pagesize': pageSize,
@@ -72,9 +71,8 @@ class MacCmsApi {
     try {
       final http.Request request = http.Request('GET', uri);
       request.headers.addAll(source.headers);
-      final http.StreamedResponse streamed = await _client
-          .send(request)
-          .timeout(const Duration(seconds: 20));
+      final http.StreamedResponse streamed =
+          await _client.send(request).timeout(const Duration(seconds: 20));
       final http.Response response =
           await http.Response.fromStream(streamed).timeout(
         const Duration(seconds: 30),
@@ -84,7 +82,16 @@ class MacCmsApi {
         throw VodException('HTTP ${response.statusCode}', url: uri.toString());
       }
 
-      return parseVodPage(response.body, requestUrl: uri.toString());
+      // 不用 response.body：它只按 UTF-8 / Latin-1 解码，遇到 GBK 老站
+      // 会直接抛 FormatException。改成自己按字节解码，编码优先级见
+      // [ResponseDecoder]。
+      final String body = ResponseDecoder.decode(
+        response.bodyBytes,
+        preferredCharset: source.charset,
+        contentType: response.headers['content-type'],
+      );
+
+      return parseVodPage(body, requestUrl: uri.toString());
     } on VodException {
       rethrow;
     } on TimeoutException {
@@ -252,9 +259,8 @@ class MacCmsApi {
 
     final Map<String, dynamic> map = data.cast<String, dynamic>();
 
-    final List<VodItem> items = _asMapList(map['list'])
-        .map(VodItem.fromJson)
-        .toList();
+    final List<VodItem> items =
+        _asMapList(map['list']).map(VodItem.fromJson).toList();
 
     final List<VodCategory> categories = _asMapList(map['class'])
         .map(VodCategory.fromJson)

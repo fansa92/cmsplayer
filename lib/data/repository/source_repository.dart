@@ -8,7 +8,8 @@ class SourceRepository {
   SourceRepository._();
 
   static Future<List<VodSource>> load() async {
-    final List<Map<String, dynamic>> raw = await JsonStore.readList(K.boxSources);
+    final List<Map<String, dynamic>> raw =
+        await JsonStore.readList(K.boxSources);
     final List<VodSource> sources = <VodSource>[];
     final Set<String> seen = <String>{};
     for (final Map<String, dynamic> json in raw) {

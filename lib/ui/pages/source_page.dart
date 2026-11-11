@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants.dart';
+import '../../core/theme/app_theme.dart';
 import '../../data/models/vod_source.dart';
 import '../../state/source_store.dart';
 import '../actions.dart';
@@ -59,8 +60,7 @@ class _SourcePageState extends State<SourcePage> {
               ? const EmptyState(
                   icon: Icons.dns_outlined,
                   title: '还没有资源站',
-                  subtitle:
-                      '本应用本身不提供任何影片，只负责对接 macCMS（苹果CMS）资源站接口。'
+                  subtitle: '本应用本身不提供任何影片，只负责对接 macCMS（苹果CMS）资源站接口。'
                       '可以导入官方源列表，或手动填写接口地址。',
                 )
               : _buildList(store),
@@ -135,7 +135,8 @@ class _SourcePageState extends State<SourcePage> {
     if (!mounted) return;
     setState(() => _testResults[source.id] = ok);
     if (context.mounted) {
-      AppActions.snack(context, ok ? '「${source.name}」连接正常' : '「${source.name}」无法连接');
+      AppActions.snack(
+          context, ok ? '「${source.name}」连接正常' : '「${source.name}」无法连接');
     }
   }
 
@@ -159,7 +160,8 @@ class _SourcePageState extends State<SourcePage> {
               (VodSource s) => MapEntry<String, bool>(s.id, ok.contains(s.id)),
             ));
         });
-        AppActions.snack(context, '通过 ${ok.length}/${store.enabledSources.length} 个源');
+        AppActions.snack(
+            context, '通过 ${ok.length}/${store.enabledSources.length} 个源');
         break;
       case 'export':
         await _export(context, store);
@@ -270,14 +272,15 @@ class _SourcePageState extends State<SourcePage> {
             TextField(
               controller: controller,
               maxLines: 2,
-              decoration: const InputDecoration(hintText: 'https://…/source.json'),
+              decoration:
+                  const InputDecoration(hintText: 'https://…/source.json'),
             ),
             const SizedBox(height: 12),
             Text(
               '官方源列表：\n${K.officialSourceListUrl}\n\n国内打不开时改用镜像：\n${K.officialSourceListMirror}',
-              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+              style: Theme.of(ctx).textTheme.labelSmall?.copyWith(
                     color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                    fontSize: 11,
+                    height: 1.5,
                   ),
             ),
           ],
@@ -295,7 +298,8 @@ class _SourcePageState extends State<SourcePage> {
       ),
     );
     if (url == null || url.isEmpty || !context.mounted) return;
-    await _doImport(context, () => context.read<SourceStore>().importFromUrl(url));
+    await _doImport(
+        context, () => context.read<SourceStore>().importFromUrl(url));
   }
 
   Future<void> _importFromText(BuildContext context) async {
@@ -311,7 +315,8 @@ class _SourcePageState extends State<SourcePage> {
             maxLines: 10,
             style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
             decoration: const InputDecoration(
-              hintText: '[{"name":"示例站","api":"https://example.com/api.php/provide/vod/"}]',
+              hintText:
+                  '[{"name":"示例站","api":"https://example.com/api.php/provide/vod/"}]',
             ),
           ),
         ),
@@ -324,7 +329,8 @@ class _SourcePageState extends State<SourcePage> {
             icon: const Icon(Icons.content_paste, size: 18),
             label: const Text('从剪贴板粘贴'),
             onPressed: () async {
-              final ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
+              final ClipboardData? data =
+                  await Clipboard.getData(Clipboard.kTextPlain);
               if (data?.text != null) controller.text = data!.text!;
             },
           ),
@@ -336,7 +342,8 @@ class _SourcePageState extends State<SourcePage> {
       ),
     );
     if (text == null || text.trim().isEmpty || !context.mounted) return;
-    await _doImport(context, () => context.read<SourceStore>().importFromText(text));
+    await _doImport(
+        context, () => context.read<SourceStore>().importFromText(text));
   }
 
   Future<void> _doImport(
@@ -350,7 +357,8 @@ class _SourcePageState extends State<SourcePage> {
       if (!mounted) return;
       if (!context.mounted) return;
       AppActions.dismissRoute(context, loading);
-      AppActions.snack(context, added > 0 ? '成功导入 $added 个资源站' : '没有新增资源站（可能都已存在）');
+      AppActions.snack(
+          context, added > 0 ? '成功导入 $added 个资源站' : '没有新增资源站（可能都已存在）');
     } on Object catch (e) {
       if (!mounted) return;
       if (!context.mounted) return;
@@ -407,8 +415,10 @@ class _SourceTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final Color statusColor = testResult == null
-        ? theme.colorScheme.outline
-        : (testResult! ? Colors.greenAccent : Colors.redAccent);
+        ? theme.colorScheme.onSurfaceVariant
+        : (testResult!
+            ? AppTheme.successOn(theme.brightness)
+            : theme.colorScheme.error);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -456,8 +466,7 @@ class _SourceTile extends StatelessWidget {
                         source.api,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontSize: 11,
+                        style: theme.textTheme.labelSmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
@@ -467,9 +476,8 @@ class _SourceTile extends StatelessWidget {
                           source.note,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            fontSize: 11,
-                            color: theme.colorScheme.outline,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -495,8 +503,7 @@ class _SourceTile extends StatelessWidget {
                               padding: const EdgeInsets.only(left: 8),
                               child: Text(
                                 '已停用',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  fontSize: 11,
+                                style: theme.textTheme.labelSmall?.copyWith(
                                   color: theme.colorScheme.error,
                                 ),
                               ),
@@ -526,7 +533,8 @@ class _SourceTile extends StatelessWidget {
                         break;
                     }
                   },
-                  itemBuilder: (BuildContext ctx) => const <PopupMenuEntry<String>>[
+                  itemBuilder: (BuildContext ctx) =>
+                      const <PopupMenuEntry<String>>[
                     PopupMenuItem<String>(value: 'edit', child: Text('编辑')),
                     PopupMenuItem<String>(value: 'test', child: Text('测试连通性')),
                     PopupMenuItem<String>(value: 'delete', child: Text('删除')),
@@ -560,7 +568,9 @@ class _StatusDot extends StatelessWidget {
         const SizedBox(width: 5),
         Text(
           label,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11),
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
         ),
       ],
     );
@@ -597,6 +607,9 @@ class _SourceEditDialogState extends State<_SourceEditDialog> {
   late final TextEditingController _ua = TextEditingController(
     text: widget.existing?.userAgent ?? '',
   );
+  late final TextEditingController _charset = TextEditingController(
+    text: widget.existing?.charset ?? '',
+  );
 
   bool _advanced = false;
 
@@ -608,6 +621,7 @@ class _SourceEditDialogState extends State<_SourceEditDialog> {
     _parse.dispose();
     _referer.dispose();
     _ua.dispose();
+    _charset.dispose();
     super.dispose();
   }
 
@@ -651,7 +665,8 @@ class _SourceEditDialogState extends State<_SourceEditDialog> {
                     _advanced ? Icons.expand_less : Icons.expand_more,
                     size: 18,
                   ),
-                  label: Text(_advanced ? '收起高级选项' : '高级选项（解析接口 / Referer / UA）'),
+                  label: Text(
+                      _advanced ? '收起高级选项' : '高级选项（解析接口 / Referer / UA / 字符集）'),
                   onPressed: () => setState(() => _advanced = !_advanced),
                 ),
               ),
@@ -678,7 +693,18 @@ class _SourceEditDialogState extends State<_SourceEditDialog> {
                 TextField(
                   controller: _ua,
                   maxLines: 2,
-                  decoration: const InputDecoration(labelText: 'User-Agent（可选）'),
+                  decoration:
+                      const InputDecoration(labelText: 'User-Agent（可选）'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _charset,
+                  decoration: const InputDecoration(
+                    labelText: '字符集（可选）',
+                    hintText: '留空自动探测；老站返回乱码时填 gbk',
+                    helperText: '接口返回的中文是乱码，多半是 GBK 老站，'
+                        '这里填 gbk 即可。',
+                  ),
                 ),
               ],
             ],
@@ -704,9 +730,8 @@ class _SourceEditDialogState extends State<_SourceEditDialog> {
       AppActions.snack(context, '请填写接口地址');
       return;
     }
-    final String name = _name.text.trim().isEmpty
-        ? VodSource.hostOf(api)
-        : _name.text.trim();
+    final String name =
+        _name.text.trim().isEmpty ? VodSource.hostOf(api) : _name.text.trim();
 
     if (widget.existing == null) {
       Navigator.of(context).pop(VodSource.fromRaw(<String, Object>{
@@ -716,6 +741,7 @@ class _SourceEditDialogState extends State<_SourceEditDialog> {
         'parseApi': _parse.text.trim(),
         'referer': _referer.text.trim(),
         'userAgent': _ua.text.trim(),
+        'charset': _charset.text.trim(),
       }));
       return;
     }
@@ -728,6 +754,7 @@ class _SourceEditDialogState extends State<_SourceEditDialog> {
         parseApi: _parse.text.trim(),
         referer: _referer.text.trim(),
         userAgent: _ua.text.trim(),
+        charset: _charset.text.trim(),
       ),
     );
   }

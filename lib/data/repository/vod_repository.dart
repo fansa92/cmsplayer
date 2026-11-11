@@ -14,7 +14,22 @@ class VodRepository {
 
   static final VodRepository instance = VodRepository._();
 
-  final Map<String, _CacheEntry<VodPage>> _pages = <String, _CacheEntry<VodPage>>{};
+  /// 构造 API 客户端的工厂（测试注入点）。
+  ///
+  /// 默认直接连真实资源站；测试里换成带假 `http.Client` 的构造，
+  /// 就能在不改动任何调用方的前提下覆盖 Store 与跨源降级。
+  static MacCmsApi Function(VodSource source) apiFactory =
+      (VodSource source) => MacCmsApi(source);
+
+  /// 恢复默认工厂，供测试收尾调用。
+  static void resetApiFactory() {
+    apiFactory = (VodSource source) => MacCmsApi(source);
+  }
+
+  MacCmsApi _api(VodSource source) => apiFactory(source);
+
+  final Map<String, _CacheEntry<VodPage>> _pages =
+      <String, _CacheEntry<VodPage>>{};
   final Map<String, _CacheEntry<List<VodCategory>>> _categories =
       <String, _CacheEntry<List<VodCategory>>>{};
 
@@ -29,7 +44,7 @@ class VodRepository {
       false,
       () async {
         final VodPage page =
-            await MacCmsApi(source).query(pageSize: 1, detail: false);
+            await _api(source).query(pageSize: 1, detail: false);
         return page.categories;
       },
     );
@@ -43,7 +58,7 @@ class VodRepository {
       true,
       () async {
         final VodPage page =
-            await MacCmsApi(source).query(pageSize: 1, detail: false);
+            await _api(source).query(pageSize: 1, detail: false);
         return page.categories;
       },
     );
@@ -81,7 +96,7 @@ class VodRepository {
       key,
       force,
       () async {
-        final VodPage page = await MacCmsApi(source).query(
+        final VodPage page = await _api(source).query(
           page: pageNo,
           pageSize: pageSize,
           typeId: typeId,
@@ -114,8 +129,8 @@ class VodRepository {
       key,
       force,
       () async {
-        final VodPage page = await MacCmsApi(source)
-            .hot(page: pageNo, pageSize: pageSize);
+        final VodPage page =
+            await _api(source).hot(page: pageNo, pageSize: pageSize);
         _absorbCategories(source, page.categories);
         return page;
       },
@@ -129,7 +144,8 @@ class VodRepository {
     bool force = false,
   }) async {
     if (item.hasPlayInfo && !force) return item;
-    final String key = _key(source, <String, Object?>{'kind': 'detail', 'id': item.id});
+    final String key =
+        _key(source, <String, Object?>{'kind': 'detail', 'id': item.id});
     final _CacheEntry<VodPage>? cached = _pages[key];
     if (!force &&
         cached != null &&
@@ -143,8 +159,7 @@ class VodRepository {
       key,
       force,
       () async {
-        final VodItem? detail =
-            await MacCmsApi(source).detail(item.id);
+        final VodItem? detail = await _api(source).detail(item.id);
         return VodPage(
           items: detail == null ? const <VodItem>[] : <VodItem>[detail],
           page: 1,
@@ -167,8 +182,10 @@ class VodRepository {
 
   /// 重试当前失败的请求（清空该源的缓存）。
   void invalidateSource(String sourceId) {
-    _pages.removeWhere((String k, _CacheEntry<VodPage> v) => k.startsWith('$sourceId|'));
-    _categories.removeWhere((String k, _CacheEntry<List<VodCategory>> v) => k.startsWith('$sourceId|'));
+    _pages.removeWhere(
+        (String k, _CacheEntry<VodPage> v) => k.startsWith('$sourceId|'));
+    _categories.removeWhere((String k, _CacheEntry<List<VodCategory>> v) =>
+        k.startsWith('$sourceId|'));
   }
 
   void clearAll() {

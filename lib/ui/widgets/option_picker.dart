@@ -25,10 +25,10 @@ Future<String?> showOptionPicker(
           ),
           child: ListView(
             shrinkWrap: true,
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             children: <Widget>[
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
                 child: Text(
                   title,
                   style: theme.textTheme.titleMedium?.copyWith(
@@ -39,11 +39,12 @@ Future<String?> showOptionPicker(
               if (allowClear)
                 ListTile(
                   dense: true,
-                  leading: Icon(
-                    selected == null || selected == clearValue
-                        ? Icons.check
-                        : Icons.close,
-                    size: 20,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(10)),
+                  ),
+                  leading: _checkMark(
+                    theme,
+                    selected == null || selected == clearValue,
                   ),
                   title: Text(clearLabel),
                   onTap: () => Navigator.of(ctx).pop(clearValue),
@@ -51,10 +52,12 @@ Future<String?> showOptionPicker(
               for (final String option in options)
                 ListTile(
                   dense: true,
-                  leading: Icon(
-                    option == selected ? Icons.check : Icons.square_outlined,
-                    size: 20,
+                  selected: option == selected,
+                  selectedTileColor: theme.colorScheme.secondaryContainer,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(10)),
                   ),
+                  leading: _checkMark(theme, option == selected),
                   title: Text(option),
                   onTap: () => Navigator.of(ctx).pop(option),
                 ),
@@ -63,5 +66,16 @@ Future<String?> showOptionPicker(
         ),
       );
     },
+  );
+}
+
+/// 未选中留空位而不是画一个 ✗ / 空方框 —— 单选列表里那些符号会被读成
+/// 「这一项被否定了」，实际只是没选中。20 宽的占位保证文字左边缘对齐。
+Widget _checkMark(ThemeData theme, bool checked) {
+  return SizedBox(
+    width: 20,
+    child: checked
+        ? Icon(Icons.check, size: 20, color: theme.colorScheme.primary)
+        : null,
   );
 }

@@ -13,7 +13,8 @@ class AppActions {
   // ---------------------------------------------------------------- 反馈
 
   static void snack(BuildContext context, String message) {
-    final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(context);
+    final ScaffoldMessengerState? messenger =
+        ScaffoldMessenger.maybeOf(context);
     messenger
       ?..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
@@ -70,7 +71,8 @@ class AppActions {
     required String vodName,
     String vodPic = '',
   }) async {
-    final Route<void> loading = showBlockingLoading(context, message: '正在获取详情…');
+    final Route<void> loading =
+        showBlockingLoading(context, message: '正在获取详情…');
     try {
       final VodItem detail = await VodRepository.instance.ensureDetail(
         source: source,
@@ -97,7 +99,8 @@ class AppActions {
     required int lineIndex,
     required int episodeIndex,
   }) async {
-    final Route<void> loading = showBlockingLoading(context, message: '正在准备播放…');
+    final Route<void> loading =
+        showBlockingLoading(context, message: '正在准备播放…');
     try {
       final VodItem detail = await VodRepository.instance.ensureDetail(
         source: source,

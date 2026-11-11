@@ -15,8 +15,15 @@ import 'app_dirs.dart';
 class JsonStore {
   JsonStore._();
 
+  /// 测试数据目录（测试注入点）。
+  ///
+  /// 不设置时完全走 [AppDirs]；测试里指向一个临时目录，避免用例之间
+  /// 互相覆盖，也避免污染真实的应用数据。
+  static Directory? overrideDirectory;
+
   static Future<File> _file(String name) async {
-    final dir = AppDirs.isReady ? AppDirs.data : AppDirs.fallback;
+    final Directory dir = overrideDirectory ??
+        (AppDirs.isReady ? AppDirs.data : AppDirs.fallback);
     return File(p.join(dir.path, name));
   }
 
@@ -46,8 +53,7 @@ class JsonStore {
   ) async {
     try {
       final File file = await _file(name);
-      final String text =
-          const JsonEncoder.withIndent('  ').convert(items);
+      final String text = const JsonEncoder.withIndent('  ').convert(items);
       await file.writeAsString(text, flush: true);
     } on Object catch (e, s) {
       AppLog.e('JsonStore', 'write $name failed: $e', s);

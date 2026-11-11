@@ -1,13 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/utils/responsive.dart';
+import '../../data/models/play_record.dart';
 import '../../data/models/vod_category.dart';
 import '../../data/models/vod_item.dart';
 import '../../data/models/vod_source.dart';
 import '../../state/browse_store.dart';
 import '../../state/history_store.dart';
+import '../../state/source_store.dart';
+import '../actions.dart';
 import '../navigation.dart';
+import '../shell/app_shell.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/poster_skeleton.dart';
+import '../widgets/vod_card.dart';
 import '../widgets/vod_grid.dart';
 
 /// 首页：当前资源站的推荐内容 + 快捷分类。
@@ -32,7 +39,7 @@ class HomePage extends StatelessWidget {
     if (browse.loading &&
         browse.items.isEmpty &&
         browse.selectableCategories.isEmpty) {
-      return const PageLoading();
+      return const PosterGridSkeleton();
     }
 
     return RefreshIndicator(
@@ -67,7 +74,7 @@ class HomePage extends StatelessWidget {
     HistoryStore history,
   ) {
     if (browse.loading && browse.items.isEmpty) {
-      return const PageLoading();
+      return const PosterGridSkeleton();
     }
 
     if (browse.error != null && browse.items.isEmpty) {
@@ -93,6 +100,7 @@ class HomePage extends StatelessWidget {
       canLoadMore: browse.canLoadMore,
       loadingMore: browse.loadingMore,
       onLoadMore: browse.loadMore,
+      header: const ContinueWatchingStrip(),
       progressOf: (VodItem item) => _progressOf(history, source, item),
       onTap: (VodItem item) => AppRoutes.openDetail(
         context,
@@ -201,19 +209,106 @@ class _CategoryChips extends StatelessWidget {
   }
 }
 
-/// 首页"最近观看"入口，供历史页复用。
-class RecentlyWatchedStrip extends StatelessWidget {
-  const RecentlyWatchedStrip({super.key, required this.onOpen});
+/// 首页「继续观看」横条。
+///
+/// 列出最近没看完的记录，点卡片直接续播；右上角「全部」切到历史页。
+///
+/// 之前这里只有一个没人引用的 `RecentlyWatchedStrip` 占位（注释写着
+/// "供历史页复用"，但历史页用的是网格），这次把它接成真正的横条。
+class ContinueWatchingStrip extends StatelessWidget {
+  const ContinueWatchingStrip({super.key});
 
-  final void Function() onOpen;
+  /// 最多显示几张卡片。
+  static const int _maxItems = 12;
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      leading: const Icon(Icons.history),
-      title: const Text('继续观看'),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: onOpen,
+    final HistoryStore history = context.watch<HistoryStore>();
+    final SourceStore sources = context.watch<SourceStore>();
+
+    // 已看完的不再占位置 —— "继续观看"要的是没看完的那些。
+    final List<PlayRecord> pending = history.records
+        .where((PlayRecord r) => !r.finished)
+        .take(_maxItems)
+        .toList();
+    if (pending.isEmpty) return const SizedBox.shrink();
+
+    final ThemeData theme = Theme.of(context);
+    final bool wide = context.isExpanded;
+    final double cardWidth = wide ? 132 : 118;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+          child: Row(
+            children: <Widget>[
+              Text(
+                '继续观看',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () =>
+                    ShellTabs.maybeOf(context)?.select(ShellTabs.historyIndex),
+                child: const Text('全部'),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          // 卡片高 = 海报（宽 × 1.5）+ 标题 + 副标题。
+          height: cardWidth * 1.5 + 42,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: pending.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (BuildContext context, int index) {
+              final PlayRecord record = pending[index];
+              final VodSource? source = _sourceOf(sources, record.sourceId);
+              return SizedBox(
+                width: cardWidth,
+                child: HistoryCard(
+                  pic: record.vodPic,
+                  title: record.vodName,
+                  subtitle: record.episodeLabel,
+                  progressLabel: record.progressLabel,
+                  progress: record.progress,
+                  headers: source?.headers ?? const <String, String>{},
+                  onTap: () => _resume(context, record, source),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  VodSource? _sourceOf(SourceStore store, String sourceId) {
+    for (final VodSource s in store.sources) {
+      if (s.id == sourceId) return s;
+    }
+    return null;
+  }
+
+  void _resume(BuildContext context, PlayRecord record, VodSource? source) {
+    if (source == null) {
+      AppActions.snack(context, '该记录所属的资源站已不存在');
+      return;
+    }
+    AppActions.resumeFromRecord(
+      context,
+      source: source,
+      vodId: int.tryParse(record.vodId) ?? 0,
+      vodName: record.vodName,
+      vodPic: record.vodPic,
+      lineIndex: record.lineIndex,
+      episodeIndex: record.episodeIndex,
     );
   }
 }

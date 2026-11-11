@@ -66,7 +66,11 @@ class LanHost {
     required this.applier,
     this.port = K.defaultLanPort,
     this.deviceName = '',
+    this.enableDiscovery = true,
   });
+
+  /// 是否开启 UDP 发现服务。测试里关掉，免得抢固定的广播端口。
+  final bool enableDiscovery;
 
   /// 取当前本地数据包，用于客户端的 `GET /sync`。
   final Future<SyncPayload> Function() provider;
@@ -86,8 +90,11 @@ class LanHost {
 
   bool get running => _server != null;
 
+  /// 实际监听的端口。[port] 传 0 时由系统分配，测试里可以据此拿到真实端口。
+  int get boundPort => _server?.port ?? port;
+
   /// 本机地址，形如 `192.168.1.5:8765`，显示给用户去别的设备上填。
-  String get address => '$_ip:$port';
+  String get address => '$_ip:$boundPort';
 
   Future<void> start() async {
     if (_server != null) return;
@@ -104,7 +111,7 @@ class LanHost {
 
     // 发现服务尽力而为：某些平台 / 网络会拒绝绑定广播端口，
     // 那就让用户手动填 IP，不影响同步本身。
-    await _startDiscovery();
+    if (enableDiscovery) await _startDiscovery();
   }
 
   Future<void> _startDiscovery() async {
@@ -122,7 +129,7 @@ class LanHost {
         if (d == null) return;
         final String text = utf8.decode(d.data, allowMalformed: true).trim();
         if (text != _kMagic) return;
-        final String reply = '$_kMagic|$_ip|$port|$deviceName';
+        final String reply = '$_kMagic|$_ip|$boundPort|$deviceName';
         try {
           sock.send(utf8.encode(reply), d.address, d.port);
         } on Object catch (e) {

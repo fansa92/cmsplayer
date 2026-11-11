@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/utils/responsive.dart';
 import '../../data/models/vod_item.dart';
 import '../../data/models/vod_source.dart';
 import '../../state/app_state.dart';
@@ -8,11 +9,18 @@ import '../../state/search_store.dart';
 import '../../state/source_store.dart';
 import '../navigation.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/poster_skeleton.dart';
 import '../widgets/vod_grid.dart';
 
 /// 搜索页：支持单源搜索与多源并发搜索。
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key});
+  const SearchPage({super.key, this.focusNode});
+
+  /// 由外壳传入的输入焦点。
+  ///
+  /// 快捷键 `Ctrl/⌘ + F` 要在页面还没挂载时就能"预埋"焦点，所以节点由
+  /// shell 持有；为 null 时页面自己建一个（单独使用本页时仍然能用）。
+  final FocusNode? focusNode;
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -21,7 +29,8 @@ class SearchPage extends StatefulWidget {
 class _SearchPageState extends State<SearchPage>
     with AutomaticKeepAliveClientMixin {
   final TextEditingController _controller = TextEditingController();
-  final FocusNode _focusNode = FocusNode();
+  late final FocusNode _focusNode = widget.focusNode ?? FocusNode();
+  late final bool _ownsFocusNode = widget.focusNode == null;
 
   @override
   bool get wantKeepAlive => true;
@@ -37,7 +46,7 @@ class _SearchPageState extends State<SearchPage>
   @override
   void dispose() {
     _controller.dispose();
-    _focusNode.dispose();
+    if (_ownsFocusNode) _focusNode.dispose();
     super.dispose();
   }
 
@@ -55,11 +64,16 @@ class _SearchPageState extends State<SearchPage>
     await _execute(q);
   }
 
+  void _pickHistory(String q) {
+    _controller.text = q;
+    _search(q);
+  }
+
   Future<void> _execute(String q) async {
     if (!mounted) return;
     final SourceStore sourceStore = context.read<SourceStore>();
-    final bool multi =
-        context.read<AppState>().multiSourceSearch && sourceStore.enabledSources.length > 1;
+    final bool multi = context.read<AppState>().multiSourceSearch &&
+        sourceStore.enabledSources.length > 1;
     await context.read<SearchStore>().search(
           keyword: q,
           active: sourceStore.active,
@@ -74,6 +88,7 @@ class _SearchPageState extends State<SearchPage>
     final ThemeData theme = Theme.of(context);
     final SearchStore store = context.watch<SearchStore>();
     final SourceStore sourceStore = context.watch<SourceStore>();
+    final bool compact = context.isCompact;
 
     return Column(
       children: <Widget>[
@@ -85,6 +100,8 @@ class _SearchPageState extends State<SearchPage>
                 child: TextField(
                   controller: _controller,
                   focusNode: _focusNode,
+                  // 桌面端进搜索页直接能打字；手机端不自动弹软键盘。
+                  autofocus: PlatformInfo.isDesktop,
                   textInputAction: TextInputAction.search,
                   // 打字只刷新清空按钮的显隐，不发请求。
                   onChanged: (_) => setState(() {}),
@@ -107,16 +124,31 @@ class _SearchPageState extends State<SearchPage>
                 ),
               ),
               const SizedBox(width: 8),
-              FilledButton.tonalIcon(
-                // 与输入框等高，否则 40px 的按钮贴着 56px 的框会显得没对齐。
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(56, 56),
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
+              if (compact)
+                Tooltip(
+                  message: '搜索',
+                  child: FilledButton.tonal(
+                    // 360dp 手机上带「搜索」二字会把输入框压到不足 200dp，
+                    // 只留图标，语义交给 Tooltip / 屏幕阅读器。
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(52, 52),
+                      padding: EdgeInsets.zero,
+                    ),
+                    onPressed: () => _search(_controller.text),
+                    child: const Icon(Icons.search),
+                  ),
+                )
+              else
+                FilledButton.tonalIcon(
+                  // 与输入框等高，否则 40px 的按钮贴着 56px 的框会显得没对齐。
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(56, 56),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                  ),
+                  onPressed: () => _search(_controller.text),
+                  icon: const Icon(Icons.search),
+                  label: const Text('搜索'),
                 ),
-                onPressed: () => _search(_controller.text),
-                icon: const Icon(Icons.search),
-                label: const Text('搜索'),
-              ),
             ],
           ),
         ),
@@ -157,10 +189,12 @@ class _SearchPageState extends State<SearchPage>
     SearchStore store,
     SourceStore sourceStore,
   ) {
-    if (store.query.isEmpty) return _HistoryPanel(store: store);
+    if (store.query.isEmpty) {
+      return _HistoryPanel(store: store, onPick: _pickHistory);
+    }
 
     if (store.loading && store.items.isEmpty) {
-      return const PageLoading(label: '正在搜索…');
+      return const PosterGridSkeleton();
     }
 
     if (store.error != null && store.items.isEmpty) {
@@ -207,9 +241,10 @@ class _SearchPageState extends State<SearchPage>
 
 /// 空查询时展示搜索历史。
 class _HistoryPanel extends StatelessWidget {
-  const _HistoryPanel({required this.store});
+  const _HistoryPanel({required this.store, required this.onPick});
 
   final SearchStore store;
+  final ValueChanged<String> onPick;
 
   @override
   Widget build(BuildContext context) {
@@ -254,19 +289,12 @@ class _HistoryPanel extends StatelessWidget {
               for (final String q in history)
                 InputChip(
                   label: Text(q),
-                  onPressed: () => _refill(context, q),
+                  onPressed: () => onPick(q),
                   onDeleted: () => store.removeHistory(q),
                 ),
             ],
           ),
       ],
     );
-  }
-
-  void _refill(BuildContext context, String q) {
-    final _SearchPageState? state =
-        context.findAncestorStateOfType<_SearchPageState>();
-    state?._controller.text = q;
-    state?._search(q);
   }
 }

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/constants.dart';
 import '../../data/sync/lan_transport.dart';
 import '../../state/sync_store.dart';
+import '../widgets/hint_paragraph.dart';
 
 /// 数据同步设置页。
 ///
@@ -78,7 +79,6 @@ class _SyncPageState extends State<SyncPage> {
         padding: const EdgeInsets.only(bottom: 32),
         children: <Widget>[
           _StatusCard(sync: sync, theme: theme),
-
           const _SectionLabel('WebDAV'),
           const _Hint('适合跨网络同步。坚果云、Nextcloud 等支持 WebDAV 的服务都可以。'),
           _field(
@@ -137,14 +137,14 @@ class _SyncPageState extends State<SyncPage> {
               ],
             ),
           ),
-
           const _SectionLabel('局域网'),
           const _Hint('两台设备在同一个网络下直连，不需要服务器。'),
           _field(
             controller: _device,
             label: '本设备名称',
             hint: sync.defaultDeviceName,
-            onSubmitted: (String v) => context.read<SyncStore>().saveDeviceName(v),
+            onSubmitted: (String v) =>
+                context.read<SyncStore>().saveDeviceName(v),
           ),
           _field(
             controller: _host,
@@ -175,12 +175,13 @@ class _SyncPageState extends State<SyncPage> {
               children: <Widget>[
                 Expanded(
                   child: FilledButton.tonal(
-                    onPressed:
-                        sync.busy || sync.discovering ? null : () async {
-                      await _saveLan();
-                      if (!context.mounted) return;
-                      await context.read<SyncStore>().discover();
-                    },
+                    onPressed: sync.busy || sync.discovering
+                        ? null
+                        : () async {
+                            await _saveLan();
+                            if (!context.mounted) return;
+                            await context.read<SyncStore>().discover();
+                          },
                     child: Text(sync.discovering ? '查找中…' : '查找设备'),
                   ),
                 ),
@@ -203,7 +204,9 @@ class _SyncPageState extends State<SyncPage> {
           const SizedBox(height: 8),
           ListTile(
             leading: Icon(
-              sync.hostingRunning ? Icons.stop_circle_outlined : Icons.wifi_tethering,
+              sync.hostingRunning
+                  ? Icons.stop_circle_outlined
+                  : Icons.wifi_tethering,
             ),
             title: Text(sync.hostingRunning ? '关闭局域网主机' : '开启局域网主机'),
             subtitle: Text(
@@ -217,17 +220,12 @@ class _SyncPageState extends State<SyncPage> {
                     ? context.read<SyncStore>().stopHost()
                     : context.read<SyncStore>().startHost(),
           ),
-
           const _SectionLabel('说明'),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 24),
-            child: Text(
-              '同步的是播放记录、收藏和源列表三样，不含账号与密码。\n\n'
-              '两边都有改动时按时间取新，删除会保留为"墓碑"，'
-              '不会被对方的旧数据复活。\n\n'
-              '本机的 WebDAV 密码以明文存在本机，请只在信任的设备上使用。',
-              style: TextStyle(fontSize: 12, height: 1.7),
-            ),
+          const HintParagraph(
+            '同步的是播放记录、收藏和源列表三样，不含账号与密码。\n\n'
+            '两边都有改动时按时间取新，删除会保留为"墓碑"，'
+            '不会被对方的旧数据复活。\n\n'
+            '本机的 WebDAV 密码以明文存在本机，请只在信任的设备上使用。',
           ),
         ],
       ),
@@ -277,9 +275,8 @@ class _StatusCard extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final Color tint = error != null
-        ? theme.colorScheme.error
-        : theme.colorScheme.primary;
+    final Color tint =
+        error != null ? theme.colorScheme.error : theme.colorScheme.primary;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -304,7 +301,9 @@ class _StatusCard extends StatelessWidget {
               )
             else
               Icon(
-                error != null ? Icons.error_outline : Icons.check_circle_outline,
+                error != null
+                    ? Icons.error_outline
+                    : Icons.check_circle_outline,
                 size: 18,
                 color: tint,
               ),
@@ -337,7 +336,8 @@ class _PeerList extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Container(
         decoration: BoxDecoration(
-          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+          border:
+              Border.all(color: Theme.of(context).colorScheme.outlineVariant),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -389,7 +389,7 @@ class _Hint extends StatelessWidget {
       child: Text(
         text,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).colorScheme.outline,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
       ),
     );
