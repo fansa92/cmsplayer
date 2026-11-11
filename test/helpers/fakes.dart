@@ -158,14 +158,14 @@ void useIsolatedStores() {
     // Windows 上刚写过的文件句柄不会立刻释放，直接递归删偶发
     // PathAccessException（errno 32）。写盘本身是 fire-and-forget 的，
     // 与其在每个用例里猜等待时长，不如在这里做几次短暂重试。
-    for (int attempt = 0; attempt < 5; attempt++) {
+    for (int attempt = 0; attempt < 16; attempt++) {
       if (!await dir.exists()) break;
       try {
         await dir.delete(recursive: true);
         break;
       } on PathAccessException {
-        if (attempt == 4) rethrow;
-        await Future<void>.delayed(const Duration(milliseconds: 30));
+        if (attempt == 15) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 60));
       }
     }
   });

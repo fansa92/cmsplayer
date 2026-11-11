@@ -140,6 +140,9 @@ class VodCard extends StatelessWidget {
 }
 
 /// 历史记录卡片：额外显示"看到第几集"。
+///
+/// [selecting] 为真时进入多选态：海报压一层遮罩并在右上角显示勾选圆点，
+/// [selected] 决定该圆点是否打勾。
 class HistoryCard extends StatelessWidget {
   const HistoryCard({
     super.key,
@@ -149,7 +152,10 @@ class HistoryCard extends StatelessWidget {
     required this.progressLabel,
     required this.progress,
     required this.onTap,
+    this.onLongPress,
     this.headers = const <String, String>{},
+    this.selecting = false,
+    this.selected = false,
   });
 
   final String pic;
@@ -158,7 +164,12 @@ class HistoryCard extends StatelessWidget {
   final String progressLabel;
   final double progress;
   final VoidCallback onTap;
+
+  /// 长按回调，用来进入多选模式。
+  final VoidCallback? onLongPress;
   final Map<String, String> headers;
+  final bool selecting;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -173,10 +184,12 @@ class HistoryCard extends StatelessWidget {
       message: title,
       child: Semantics(
         button: true,
+        selected: selecting ? selected : null,
         label: semanticLabel,
         child: ExcludeSemantics(
           child: InkWell(
             onTap: onTap,
+            onLongPress: onLongPress,
             hoverColor: theme.colorScheme.primary.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(10),
             child: Column(
@@ -230,6 +243,63 @@ class HistoryCard extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (selecting) ...<Widget>[
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? theme.colorScheme.primary
+                                        .withValues(alpha: 0.28)
+                                    : Colors.black.withValues(alpha: 0.32),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: selected
+                                      ? theme.colorScheme.primary
+                                      : Colors.white70,
+                                  width: selected ? 2 : 1,
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          top: 6,
+                          right: 6,
+                          child: IgnorePointer(
+                            child: Container(
+                              width: 22,
+                              height: 22,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: selected
+                                    ? theme.colorScheme.primary
+                                    : Colors.black38,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: selected
+                                  ? Icon(
+                                      Icons.check,
+                                      size: 14,
+                                      color: theme.colorScheme.onPrimary,
+                                    )
+                                  : null,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
