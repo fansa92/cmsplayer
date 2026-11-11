@@ -121,6 +121,21 @@ class VodItem {
     return end ? '已完结' : '连载中';
   }
 
+  /// 综合 [isEnd] 与备注文本判断「这部剧已经完结」。
+  ///
+  /// 不少资源站的 `vod_isend` 常年写 0 或干脆不返回，备注里却明写着
+  /// 「已完结」「全 24 集」。只看 [isEnd] 的话，「已完结」筛选在这些站上
+  /// 永远是空列表，所以退一步拿备注兜底；备注在说「更新至第 N 集」
+  /// 「连载」时一律判为未完结，避免把番剧误判成完结。
+  bool get finishedLikely {
+    final bool? end = isEnd;
+    if (end != null) return end;
+    final String r = remarks.trim();
+    if (r.isEmpty) return false;
+    if (RegExp(r'更新|连载|未完结').hasMatch(r)) return false;
+    return RegExp(r'已完结|完结|^全|全集|HD|BD|蓝光|正片').hasMatch(r);
+  }
+
   factory VodItem.fromJson(Map<String, dynamic> json) {
     final String from = strOf(json['vod_play_from']);
     final String url = strOf(json['vod_play_url']);

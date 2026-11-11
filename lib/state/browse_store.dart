@@ -12,7 +12,16 @@ import '../data/repository/vod_repository.dart';
 class BrowseStore extends ChangeNotifier {
   VodSource? _source;
   List<VodCategory> _categories = <VodCategory>[];
-  int _typeId = 0;
+
+  /// 选中的分类 id 集合。空集合 = 全部分类。
+  ///
+  /// 原来是一个 `int`，只能单选；改成集合后单选仍然是最常见的用法
+  /// （集合里只有一个元素），macCMS 的 `t=6,7` 也才用得起来。
+  Set<int> _typeIds = <int>{};
+  bool _onlyFinished = false;
+
+  /// 分类条是否处于「多选模式」。只是 UI 状态，不进查询参数。
+  bool _multiSelect = false;
   String _year = '';
   String _area = '';
   String _lang = '';
@@ -34,7 +43,12 @@ class BrowseStore extends ChangeNotifier {
   /// 可供点击的分类。详见 [VodCategory.leafOnly]。
   List<VodCategory> get selectableCategories =>
       VodCategory.leafOnly(_categories);
-  int get typeId => _typeId;
+
+  /// 选中的第一个分类（沿用旧的单选语义，供展示类逻辑使用）。
+  int get typeId => _typeIds.isEmpty ? 0 : _typeIds.first;
+  Set<int> get selectedCategoryIds => Set<int>.unmodifiable(_typeIds);
+  bool get multiSelect => _multiSelect;
+  bool get onlyFinished => _onlyFinished;
   String get year => _year;
   String get area => _area;
   String get lang => _lang;
@@ -49,7 +63,8 @@ class BrowseStore extends ChangeNotifier {
   String? get error => _error;
 
   bool get hasFilter =>
-      _typeId > 0 ||
+      _typeIds.isNotEmpty ||
+      _onlyFinished ||
       _year.isNotEmpty ||
       _area.isNotEmpty ||
       _lang.isNotEmpty ||
@@ -58,10 +73,18 @@ class BrowseStore extends ChangeNotifier {
   bool get canLoadMore => _pageNo < _pageCount;
 
   String get categoryTitle {
+    if (_typeIds.isEmpty) return '全部';
     if (_categories.isEmpty) return '全部';
-    final VodCategory? c =
-        _categories.where((VodCategory e) => e.id == _typeId).firstOrNull;
-    return c?.name ?? '全部';
+    final Map<int, String> names = <int, String>{
+      for (final VodCategory c in _categories) c.id: c.name,
+    };
+    final List<String> picked = <String>[
+      for (final int id in _typeIds)
+        if (names[id] != null) names[id]!,
+    ];
+    if (picked.isEmpty) return '全部';
+    if (picked.length == 1) return picked.first;
+    return '${picked.first} 等 ${picked.length} 类';
   }
 
   void _emit() {
@@ -76,7 +99,9 @@ class BrowseStore extends ChangeNotifier {
     if (_source?.id == source.id) return;
     _source = source;
     _categories = <VodCategory>[];
-    _typeId = 0;
+    _typeIds = <int>{};
+    _onlyFinished = false;
+    _multiSelect = false;
     _year = '';
     _area = '';
     _lang = '';
@@ -109,11 +134,12 @@ class BrowseStore extends ChangeNotifier {
         source: source,
         pageNo: 1,
         pageSize: _pageSize,
-        typeId: _typeId,
+        typeIds: _typeIds.toList(),
         year: _year,
         area: _area,
         lang: _lang,
         sortBy: _sortBy,
+        isEnd: _onlyFinished ? true : null,
         detail: true,
         force: force,
       );
@@ -133,7 +159,7 @@ class BrowseStore extends ChangeNotifier {
         }
       }
 
-      _items = page.items;
+      _items = _applyEndFilter(page.items);
       _pageNo = page.page;
       _pageCount = page.pageCount;
       _total = page.total;
@@ -161,14 +187,15 @@ class BrowseStore extends ChangeNotifier {
         source: source,
         pageNo: _pageNo + 1,
         pageSize: _pageSize,
-        typeId: _typeId,
+        typeIds: _typeIds.toList(),
         year: _year,
         area: _area,
         lang: _lang,
         sortBy: _sortBy,
+        isEnd: _onlyFinished ? true : null,
         detail: true,
       );
-      _items = <VodItem>[..._items, ...page.items];
+      _items = <VodItem>[..._items, ..._applyEndFilter(page.items)];
       _pageNo = page.page;
       _pageCount = page.pageCount;
       _total = page.total;
@@ -183,14 +210,54 @@ class BrowseStore extends ChangeNotifier {
 
   // ---------------------------------------------------------------- 筛选
 
-  Future<void> selectCategory(int typeId) async {
-    if (_typeId == typeId) return;
-    _typeId = typeId;
+  /// 已完结筛选的本地兜底。
+  ///
+  /// 服务端认 `isend` 就已经筛过一遍，这里再筛一次不会改变结果；不认的
+  /// 站点会把参数当空气，靠这一步保证列表里不会混进连载中的片子。
+  List<VodItem> _applyEndFilter(List<VodItem> items) {
+    if (!_onlyFinished) return items;
+    return items
+        .where((VodItem e) => e.finishedLikely)
+        .toList(growable: false);
+  }
+
+  void _resetPages() {
     _items = <VodItem>[];
     _pageNo = 1;
     _pageCount = 1;
+  }
+
+  /// 单选：点分类条上的某个分类。传 0 表示「全部」。
+  Future<void> selectCategory(int typeId) =>
+      setCategories(typeId > 0 ? <int>{typeId} : <int>{});
+
+  /// 多选模式下累加 / 取消某个分类。
+  Future<void> toggleCategory(int id) {
+    if (id <= 0) return setCategories(<int>{});
+    final Set<int> next = Set<int>.from(_typeIds);
+    if (!next.remove(id)) next.add(id);
+    return setCategories(next);
+  }
+
+  /// 直接指定分类集合。空集合等同于「全部」。
+  Future<void> setCategories(Set<int> ids) async {
+    final Set<int> next = ids.where((int e) => e > 0).toSet();
+    if (next.length == _typeIds.length && next.containsAll(_typeIds)) return;
+    _typeIds = next;
+    _resetPages();
     _emit();
     await refresh();
+  }
+
+  /// 切换分类条的多选模式。退出多选时把选中收敛成第一个，避免留下
+  /// 一个用户看不见的解释不清的多选状态。
+  Future<void> setMultiSelect(bool value) async {
+    if (_multiSelect == value) return;
+    _multiSelect = value;
+    _emit();
+    if (!value && _typeIds.length > 1) {
+      await setCategories(<int>{_typeIds.first});
+    }
   }
 
   Future<void> applyFilter({
@@ -198,6 +265,7 @@ class BrowseStore extends ChangeNotifier {
     String? area,
     String? lang,
     String? sortBy,
+    bool? onlyFinished,
   }) async {
     bool changed = false;
     if (year != null && _year != year) {
@@ -216,24 +284,26 @@ class BrowseStore extends ChangeNotifier {
       _sortBy = sortBy;
       changed = true;
     }
+    if (onlyFinished != null && _onlyFinished != onlyFinished) {
+      _onlyFinished = onlyFinished;
+      changed = true;
+    }
     if (!changed) return;
-    _items = <VodItem>[];
-    _pageNo = 1;
-    _pageCount = 1;
+    _resetPages();
     _emit();
     await refresh();
   }
 
   Future<void> clearFilter() async {
     if (!hasFilter) return;
-    _typeId = 0;
+    _typeIds = <int>{};
+    _onlyFinished = false;
+    _multiSelect = false;
     _year = '';
     _area = '';
     _lang = '';
     _sortBy = '';
-    _items = <VodItem>[];
-    _pageNo = 1;
-    _pageCount = 1;
+    _resetPages();
     _emit();
     await refresh();
   }
@@ -252,12 +322,5 @@ class BrowseStore extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     super.dispose();
-  }
-}
-
-extension<T> on Iterable<T> {
-  T? get firstOrNull {
-    final Iterator<T> it = iterator;
-    return it.moveNext() ? it.current : null;
   }
 }

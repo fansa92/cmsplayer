@@ -11,6 +11,15 @@ import '../models/vod_category.dart';
 import '../models/vod_item.dart';
 import '../models/vod_source.dart';
 
+/// 热播榜单的时间窗。
+enum HotWindow {
+  /// 最近 24 小时（macCMS 的 `h` 参数）。
+  day,
+
+  /// 最近一个月（macCMS 的 `m` 参数）。
+  month,
+}
+
 /// macCMS（苹果CMS）VOD 接口客户端。
 ///
 /// 支持的查询参数与官方 v10 保持一致：
@@ -104,15 +113,20 @@ class MacCmsApi {
   // ---------------------------------------------------------------- 查询
 
   /// 列表或分类页。`detail: true` 时返回的条目才带播放地址。
+  ///
+  /// [typeIds] 非空时优先于 [typeId]：macCMS 的 `t` 支持逗号分隔的多个
+  /// 分类 id（如 `t=6,7`），用来做分类多选。
   Future<VodPage> query({
     int page = 1,
     int pageSize = 20,
     int typeId = 0,
+    List<int> typeIds = const <int>[],
     String? keyword,
     String? year,
     String? area,
     String? lang,
     String? sortBy,
+    bool? isEnd,
     bool detail = false,
   }) {
     final Map<String, String> params = <String, String>{
@@ -120,7 +134,16 @@ class MacCmsApi {
       'pg': '$page',
       'pagesize': '$pageSize',
     };
-    if (typeId > 0) params['t'] = '$typeId';
+    final List<int> ids = typeIds.where((int e) => e > 0).toList();
+    if (ids.isNotEmpty) {
+      params['t'] = ids.join(',');
+    } else if (typeId > 0) {
+      params['t'] = '$typeId';
+    }
+    // `isend` 不是 macCMS v10 `provide/vod` 的标准参数，认它的站点会把
+    // 结果过滤掉，不认的站点直接忽略。所以调用方拿到响应后还要本地再筛
+    // 一遍，不能只靠服务端。
+    if (isEnd != null) params['isend'] = isEnd ? '1' : '0';
     final String? kw = keyword?.trim();
     if (kw != null && kw.isNotEmpty) params['wd'] = kw;
     // 注意：macCMS 的年份参数是 `year`，不是 `yy`。
@@ -168,17 +191,25 @@ class MacCmsApi {
   }
 
   /// 热播。部分站点不支持 `h` / `m` 参数，会回退到第一个分类。
-  Future<VodPage> hot({int page = 1, int pageSize = 20, int hours = 24}) async {
+  ///
+  /// [window] 决定用哪个时间窗：`h=24` 是最近 24 小时，`m=30` 是最近
+  /// 一个月。两个参数都是 macCMS 的约定，实测多数站点至少认其中一个。
+  Future<VodPage> hot({
+    int page = 1,
+    int pageSize = 20,
+    HotWindow window = HotWindow.day,
+  }) async {
+    final bool month = window == HotWindow.month;
     try {
       final VodPage result = await _fetch(<String, String>{
         'ac': 'detail',
-        'h': '$hours',
+        if (month) 'm': '30' else 'h': '24',
         'pg': '$page',
         'pagesize': '$pageSize',
       });
       if (result.items.isNotEmpty) return result;
     } on VodException catch (e) {
-      AppLog.d('MacCms', 'hot(h=$hours) unsupported, fallback: $e');
+      AppLog.d('MacCms', 'hot($window) unsupported, fallback: $e');
     }
     return _fallbackList(page: page, pageSize: pageSize);
   }

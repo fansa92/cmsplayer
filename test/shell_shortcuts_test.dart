@@ -9,6 +9,7 @@ import 'package:cms_player/state/app_state.dart';
 import 'package:cms_player/state/browse_store.dart';
 import 'package:cms_player/state/favorites_store.dart';
 import 'package:cms_player/state/history_store.dart';
+import 'package:cms_player/state/home_store.dart';
 import 'package:cms_player/state/search_store.dart';
 import 'package:cms_player/state/source_store.dart';
 import 'package:cms_player/ui/pages/favorites_page.dart';
@@ -82,6 +83,7 @@ void main() {
             ChangeNotifierProvider<AppState>.value(value: AppState(settings)),
             ChangeNotifierProvider<SourceStore>.value(value: sources),
             ChangeNotifierProvider<BrowseStore>.value(value: BrowseStore()),
+            ChangeNotifierProvider<HomeStore>.value(value: HomeStore()),
             ChangeNotifierProvider<SearchStore>.value(value: SearchStore()),
             ChangeNotifierProvider<FavoritesStore>.value(
               value: FavoritesStore(),

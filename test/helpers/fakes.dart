@@ -97,6 +97,8 @@ Map<String, Object> vodJson({
   required int id,
   required String name,
   String year = '',
+  String remarks = '',
+  bool? isEnd,
   String playFrom = '',
   String playUrl = '',
 }) =>
@@ -104,6 +106,8 @@ Map<String, Object> vodJson({
       'vod_id': id,
       'vod_name': name,
       if (year.isNotEmpty) 'vod_year': year,
+      if (remarks.isNotEmpty) 'vod_remarks': remarks,
+      if (isEnd != null) 'vod_isend': isEnd ? 1 : 0,
       'vod_play_from': playFrom,
       'vod_play_url': playUrl,
     };

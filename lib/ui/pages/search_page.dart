@@ -227,7 +227,14 @@ class _SearchPageState extends State<SearchPage>
           all: sourceStore.enabledSources,
         ),
         sourceLabelOf: store.multiSource
-            ? (VodItem item) => store.sourceOf(item)?.name ?? ''
+            ? (VodItem item) {
+                final VodSource? s = store.sourceOf(item);
+                if (s == null) return '';
+                final int n = store.sourceCountOf(item);
+                // 聚合之后一条结果可能来自多个源，标清楚这一条有几个源
+                // 可选，用户切源时心里有数。
+                return n > 1 ? '${s.name} · $n 源' : s.name;
+              }
             : (VodItem item) => '',
         onTap: (VodItem item) {
           final VodSource? source = store.sourceOf(item) ?? sourceStore.active;

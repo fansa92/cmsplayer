@@ -6,6 +6,7 @@ import 'app_shortcuts.dart';
 import 'lazy_indexed_stack.dart';
 import '../../data/models/vod_source.dart';
 import '../../state/browse_store.dart';
+import '../../state/home_store.dart';
 import '../../state/search_store.dart';
 import '../../state/source_store.dart';
 import '../navigation.dart';
@@ -70,6 +71,7 @@ class _AppShellState extends State<AppShell> {
       if (_attached && browse.source?.id == source.id) return;
       _attached = true;
       browse.attach(source);
+      context.read<HomeStore>().attach(source);
     });
   }
 

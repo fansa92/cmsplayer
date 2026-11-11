@@ -11,7 +11,11 @@ import '../data/repository/vod_repository.dart';
 class SearchStore extends ChangeNotifier {
   String _query = '';
   List<VodItem> _items = <VodItem>[];
-  final Map<String, VodSource> _itemSource = <String, VodSource>{};
+
+  /// 聚合键 → 出现过的源。多源搜索时同一个片名会命中多个源，界面只显示
+  /// 一条，但要能说清「这条结果有哪几个源有」。
+  final Map<String, List<VodSource>> _groupSources =
+      <String, List<VodSource>>{};
   bool _loading = false;
   String? _error;
   int _pageNo = 1;
@@ -33,9 +37,51 @@ class SearchStore extends ChangeNotifier {
   List<String> get history => _history;
 
   /// 结果条目所属的源（多源搜索时用于展示来源标签）。
-  VodSource? sourceOf(VodItem item) => _itemSource['${item.id}|${item.name}'];
+  ///
+  /// 聚合后一条结果可能对应多个源，这里给的是「代表条目」所在的源。
+  VodSource? sourceOf(VodItem item) {
+    final List<VodSource>? list = _groupSources[_groupKey(item)];
+    if (list == null || list.isEmpty) return null;
+    return list.first;
+  }
 
-  static String _itemKey(VodItem item) => '${item.id}|${item.name}';
+  /// 这条结果命中过多少个源。1 表示只有当前源有。
+  int sourceCountOf(VodItem item) =>
+      _groupSources[_groupKey(item)]?.length ?? 0;
+
+  /// 所有结果的来源列表分组，供调试与测试观察。
+  @visibleForTesting
+  Map<String, List<VodSource>> get groupSources =>
+      Map<String, List<VodSource>>.unmodifiable(_groupSources);
+
+  static String _groupKey(VodItem item) =>
+      '${_normalizeName(item.name)}|${item.year.trim()}';
+
+  /// 归一化片名，用于跨源聚合。
+  ///
+  /// 同一部片在不同源里的名字常带尾巴：全角空格、`(2024)`、「国语版」。
+  /// 只做低成本的收敛，不碰繁简转换（要一张对照表，收益也不够明显）。
+  static String _normalizeName(String raw) {
+    String s = raw.toLowerCase();
+    s = s.replaceAll(RegExp(r'[\s\u3000]+'), '');
+    s = s.replaceAll(RegExp(r'[\(（\[【][^\)）\]】]*[\)）\]】]'), '');
+    s = s.replaceAll(
+      RegExp(r'(国语|粤语|英语|日语|韩语|中字|高清|蓝光|完整|未删减)(版)?$'),
+      '',
+    );
+    s = s.replaceAll(RegExp(r'(hd|bd|tc|web-dl)$'), '');
+    return s;
+  }
+
+  /// 同一部片在多个源里出现时，选哪条当代表。
+  ///
+  /// 有播放地址 > 集数多，剩下的交给先后顺序（即 `all` 里的源顺序）。
+  static bool _preferOver(VodItem candidate, VodItem current) {
+    if (candidate.hasPlayInfo != current.hasPlayInfo) {
+      return candidate.hasPlayInfo;
+    }
+    return candidate.episodeCount > current.episodeCount;
+  }
 
   void _emit() {
     if (_disposed) return;
@@ -51,7 +97,7 @@ class SearchStore extends ChangeNotifier {
   void clearResult() {
     _query = '';
     _items = <VodItem>[];
-    _itemSource.clear();
+    _groupSources.clear();
     _error = null;
     _pageNo = 1;
     _pageCount = 1;
@@ -111,7 +157,7 @@ class SearchStore extends ChangeNotifier {
     _error = null;
     if (pageNo <= 1) {
       _items = <VodItem>[];
-      _itemSource.clear();
+      _groupSources.clear();
     }
     _emit();
 
@@ -158,11 +204,7 @@ class SearchStore extends ChangeNotifier {
       detail: true,
       force: pageNo <= 1,
     );
-    final List<VodItem> incoming = page.items;
-    for (final VodItem item in incoming) {
-      _itemSource[_itemKey(item)] = source;
-    }
-    _items = pageNo <= 1 ? incoming : <VodItem>[..._items, ...incoming];
+    _mergeIncoming(page.items, source);
     _pageNo = page.page;
     _pageCount = page.pageCount;
   }
@@ -188,26 +230,53 @@ class SearchStore extends ChangeNotifier {
 
     final List<VodPage> pages = await Future.wait(futures);
 
-    final Map<String, VodItem> merged = pageNo <= 1
-        ? <String, VodItem>{}
-        : <String, VodItem>{
-            for (final VodItem e in _items) '${e.id}|${e.name}': e,
-          };
-
     int maxPage = 1;
     for (int i = 0; i < pages.length; i++) {
       final VodPage page = pages[i];
       if (page.pageCount > maxPage) maxPage = page.pageCount;
-      for (final VodItem item in page.items) {
-        final String key = _itemKey(item);
-        merged[key] ??= item;
-        _itemSource[key] = sources[i];
-      }
+      _mergeIncoming(page.items, sources[i]);
     }
 
-    _items = merged.values.toList();
     _pageNo = pageNo;
     _pageCount = maxPage;
+  }
+
+  /// 把一批结果并进当前列表，按「规范片名 + 年代」聚合。
+  ///
+  /// 原来的键是 `id|name`，而同一部片在不同资源站的 id 完全不同，多源搜索
+  /// 时一部片会并排出现三四条。现在同名的只留一条，并把命中的源记下来，
+  /// 界面上标「共 N 个源」。
+  void _mergeIncoming(List<VodItem> incoming, VodSource source) {
+    final Map<String, int> index = <String, int>{
+      for (int i = 0; i < _items.length; i++) _groupKey(_items[i]): i,
+    };
+
+    for (final VodItem item in incoming) {
+      final String key = _groupKey(item);
+      final int? at = index[key];
+      if (at == null) {
+        index[key] = _items.length;
+        _items.add(item);
+        _groupSources[key] = <VodSource>[source];
+        continue;
+      }
+
+      final List<VodSource> owners = _groupSources.putIfAbsent(
+        key,
+        () => <VodSource>[],
+      );
+      final bool known =
+          owners.any((VodSource e) => e.id == source.id);
+      if (!known) owners.add(source);
+
+      // 代表条目可能换成播放信息更全的那条，但聚合键不变，位置也不动。
+      if (_preferOver(item, _items[at])) {
+        _items[at] = item;
+        // 代表换了，把它所在的源挪到最前，[sourceOf] 返回的才和界面对得上。
+        owners.removeWhere((VodSource e) => e.id == source.id);
+        owners.insert(0, source);
+      }
+    }
   }
 
   @override

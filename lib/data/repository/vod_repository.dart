@@ -71,23 +71,27 @@ class VodRepository {
     int pageNo = 1,
     int pageSize = K.defaultPageSize,
     int typeId = 0,
+    List<int> typeIds = const <int>[],
     String? keyword,
     String? year,
     String? area,
     String? lang,
     String? sortBy,
+    bool? isEnd,
     bool detail = true,
     bool force = false,
   }) {
+    final List<int> ids = typeIds.where((int e) => e > 0).toList()..sort();
     final String key = _key(source, <String, Object?>{
       'pg': pageNo,
       'ps': pageSize,
-      't': typeId,
+      't': ids.isEmpty ? typeId : ids.join(','),
       'wd': keyword,
       'year': year,
       'area': area,
       'lang': lang,
       'by': sortBy,
+      'end': isEnd,
       'ac': detail ? 'd' : 'l',
     });
 
@@ -100,11 +104,13 @@ class VodRepository {
           page: pageNo,
           pageSize: pageSize,
           typeId: typeId,
+          typeIds: ids,
           keyword: keyword,
           year: year,
           area: area,
           lang: lang,
           sortBy: sortBy,
+          isEnd: isEnd,
           detail: detail,
         );
         _absorbCategories(source, page.categories);
@@ -117,10 +123,12 @@ class VodRepository {
     required VodSource source,
     int pageNo = 1,
     int pageSize = K.defaultPageSize,
+    HotWindow window = HotWindow.day,
     bool force = false,
   }) {
     final String key = _key(source, <String, Object?>{
       'kind': 'hot',
+      'w': window.name,
       'pg': pageNo,
       'ps': pageSize,
     });
@@ -129,8 +137,8 @@ class VodRepository {
       key,
       force,
       () async {
-        final VodPage page =
-            await _api(source).hot(page: pageNo, pageSize: pageSize);
+        final VodPage page = await _api(source)
+            .hot(page: pageNo, pageSize: pageSize, window: window);
         _absorbCategories(source, page.categories);
         return page;
       },

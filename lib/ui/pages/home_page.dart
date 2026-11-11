@@ -8,6 +8,7 @@ import '../../data/models/vod_item.dart';
 import '../../data/models/vod_source.dart';
 import '../../state/browse_store.dart';
 import '../../state/history_store.dart';
+import '../../state/home_store.dart';
 import '../../state/source_store.dart';
 import '../actions.dart';
 import '../navigation.dart';
@@ -20,6 +21,19 @@ import '../widgets/vod_grid.dart';
 /// 首页：当前资源站的推荐内容 + 快捷分类。
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
+
+  /// 刷新网格和上方板块。
+  ///
+  /// 串行而不是并发：几个请求同时打到同一个资源站，部分站点会降级返回，
+  /// 反而让某个板块直接失败。
+  static Future<void> _refreshAll(
+    BuildContext context,
+    BrowseStore browse,
+  ) async {
+    final HomeStore home = context.read<HomeStore>();
+    await browse.refresh(force: true);
+    await home.refresh(force: true);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -43,14 +57,14 @@ class HomePage extends StatelessWidget {
     }
 
     return RefreshIndicator(
-      onRefresh: () => browse.refresh(force: true),
+      onRefresh: () => _refreshAll(context, browse),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           _SectionHeader(
-            title: '为你推荐',
+            title: '最近更新',
             subtitle: '${browse.categoryTitle} · 共 ${browse.total} 部',
-            onRefresh: () => browse.refresh(force: true),
+            onRefresh: () => _refreshAll(context, browse),
           ),
           if (browse.selectableCategories.isNotEmpty)
             _CategoryChips(browse: browse),
@@ -100,7 +114,13 @@ class HomePage extends StatelessWidget {
       canLoadMore: browse.canLoadMore,
       loadingMore: browse.loadingMore,
       onLoadMore: browse.loadMore,
-      header: const ContinueWatchingStrip(),
+      header: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          ContinueWatchingStrip(),
+          HomeSections(),
+        ],
+      ),
       progressOf: (VodItem item) => _progressOf(history, source, item),
       onTap: (VodItem item) => AppRoutes.openDetail(
         context,
@@ -116,6 +136,59 @@ class HomePage extends StatelessWidget {
     VodItem item,
   ) {
     return history.byIds(source.id, item.id)?.progress ?? 0;
+  }
+}
+
+/// 首页网格上方的横排板块（今日热播 / 本月热门 / 高分佳作）。
+///
+/// 板块数据由 [HomeStore] 管，和网格的 [BrowseStore] 分开：网格是分页的
+/// 主列表，板块是固定取前 N 条的推荐位，两者失败互不影响。
+class HomeSections extends StatelessWidget {
+  const HomeSections({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final HomeStore store = context.watch<HomeStore>();
+    final VodSource? source = store.source;
+    if (source == null || store.sections.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final Map<String, String> headers = source.headers;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        for (final HomeSection section in store.sections) ...<Widget>[
+          _SectionTitle(title: section.title),
+          VodRow(
+            items: section.items,
+            headers: headers,
+            onTap: (VodItem item) =>
+                AppRoutes.openDetail(context, item: item, source: source),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
+      child: Text(
+        title,
+        style: theme.textTheme.titleMedium?.copyWith(
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
   }
 }
 

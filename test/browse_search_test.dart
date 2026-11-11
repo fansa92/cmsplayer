@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:cms_player/data/models/vod_item.dart';
 import 'package:cms_player/data/models/vod_source.dart';
 import 'package:cms_player/state/browse_store.dart';
 import 'package:cms_player/state/search_store.dart';
@@ -217,6 +218,146 @@ void main() {
     });
   });
 
+  group('分类多选与已完结筛选', () {
+    final List<Map<String, Object>> classes = <Map<String, Object>>[
+      <String, Object>{'type_id': 6, 'type_name': '动作片', 'type_pid': 0},
+      <String, Object>{'type_id': 7, 'type_name': '喜剧片', 'type_pid': 0},
+    ];
+
+    /// 固定条目 + 固定分类表的假客户端，用来观察筛选参数与本地过滤。
+    FakeHttpClient listClient(List<Map<String, Object>> list) =>
+        FakeHttpClient((RecordedRequest r) {
+          return fakeJson(vodPageJson(
+            list: list,
+            classes: classes,
+            total: list.length,
+          ));
+        });
+
+    test('多选分类把 t 拼成逗号分隔的 id', () async {
+      final FakeHttpClient client = listClient(<Map<String, Object>>[
+        vodJson(id: 1, name: 'A'),
+      ]);
+      useFakeApi(client);
+      final BrowseStore store = BrowseStore();
+      await store.attach(s1);
+
+      await store.setCategories(<int>{6, 7});
+
+      expect(client.last.url.queryParameters['t'], '6,7');
+      expect(store.selectedCategoryIds, <int>{6, 7});
+      expect(store.categoryTitle, '动作片 等 2 类');
+      expect(store.pageNo, 1);
+    });
+
+    test('toggleCategory 累加与取消，取消到空回到全部', () async {
+      final FakeHttpClient client = listClient(<Map<String, Object>>[
+        vodJson(id: 1, name: 'A'),
+      ]);
+      useFakeApi(client);
+      final BrowseStore store = BrowseStore();
+      await store.attach(s1);
+
+      await store.toggleCategory(6);
+      expect(store.selectedCategoryIds, <int>{6});
+      expect(store.categoryTitle, '动作片');
+
+      await store.toggleCategory(7);
+      expect(store.selectedCategoryIds, <int>{6, 7});
+
+      await store.toggleCategory(6);
+      expect(store.selectedCategoryIds, <int>{7});
+
+      await store.toggleCategory(7);
+      expect(store.selectedCategoryIds, isEmpty);
+      expect(store.categoryTitle, '全部');
+      // 空集合的查询缓存键与 attach 那一次相同，直接断言 last 会读到旧请求，
+      // 这里强制发一次再验证「没有 t 参数」。
+      await store.refresh(force: true);
+      expect(client.last.url.queryParameters.containsKey('t'), isFalse);
+    });
+
+    test('退出多选模式只保留第一个分类', () async {
+      final FakeHttpClient client = listClient(<Map<String, Object>>[
+        vodJson(id: 1, name: 'A'),
+      ]);
+      useFakeApi(client);
+      final BrowseStore store = BrowseStore();
+      await store.attach(s1);
+
+      await store.setMultiSelect(true);
+      expect(store.multiSelect, isTrue);
+      await store.setCategories(<int>{6, 7});
+
+      await store.setMultiSelect(false);
+
+      expect(store.multiSelect, isFalse);
+      expect(store.selectedCategoryIds, <int>{6});
+      expect(client.last.url.queryParameters['t'], '6');
+    });
+
+    test('已完结：请求带 isend=1，且本地再筛一遍', () async {
+      // 模拟"站点不认 isend、原样返回"的行为：混合数据全给回来。
+      final FakeHttpClient client = listClient(<Map<String, Object>>[
+        vodJson(id: 1, name: '完结的', isEnd: true),
+        vodJson(id: 2, name: '连载的', isEnd: false),
+        vodJson(id: 3, name: '也完结的', isEnd: true),
+      ]);
+      useFakeApi(client);
+      final BrowseStore store = BrowseStore();
+      await store.attach(s1);
+      expect(store.items, hasLength(3));
+
+      await store.applyFilter(onlyFinished: true);
+
+      expect(client.last.url.queryParameters['isend'], '1');
+      expect(store.onlyFinished, isTrue);
+      expect(store.items.map((VodItem e) => e.id).toList(), <int>[1, 3]);
+    });
+
+    test('已完结：源站没给 vod_isend 时按备注兜底', () async {
+      final FakeHttpClient client = listClient(<Map<String, Object>>[
+        vodJson(id: 1, name: '写了已完结', remarks: '已完结'),
+        vodJson(id: 2, name: '更新中', remarks: '更新至第 12 集'),
+        vodJson(id: 3, name: '全 24 集', remarks: '全24集'),
+        vodJson(id: 4, name: '什么都没写'),
+      ]);
+      useFakeApi(client);
+      final BrowseStore store = BrowseStore();
+      await store.attach(s1);
+
+      await store.applyFilter(onlyFinished: true);
+
+      // 只认备注里明确的完结信号；「更新至」和空备注都不算。
+      expect(store.items.map((VodItem e) => e.id).toList(), <int>[1, 3]);
+    });
+
+    test('clearFilter 复位分类集合、多选模式与完结筛选', () async {
+      final FakeHttpClient client = listClient(<Map<String, Object>>[
+        vodJson(id: 1, name: 'A', isEnd: true),
+      ]);
+      useFakeApi(client);
+      final BrowseStore store = BrowseStore();
+      await store.attach(s1);
+
+      await store.setMultiSelect(true);
+      await store.setCategories(<int>{6, 7});
+      await store.applyFilter(onlyFinished: true, year: '2024');
+      expect(store.hasFilter, isTrue);
+
+      await store.clearFilter();
+
+      expect(store.hasFilter, isFalse);
+      expect(store.selectedCategoryIds, isEmpty);
+      expect(store.multiSelect, isFalse);
+      expect(store.onlyFinished, isFalse);
+      expect(store.year, isEmpty);
+      // clearFilter 后的缓存键与 attach 相同，会直接命中，这里强制再拉一次。
+      await store.refresh(force: true);
+      expect(client.last.url.queryParameters.containsKey('isend'), isFalse);
+    });
+  });
+
   group('SearchStore', () {
     test('单源搜索填充结果、来源映射与搜索历史', () async {
       final FakeHttpClient client = pagingClient();
@@ -255,13 +396,14 @@ void main() {
       expect(client.requests, isEmpty);
     });
 
-    test('多源结果按 id|name 去重，页码取各源最大值', () async {
-      // 两个源返回完全相同的条目（同名同 id），只应留下一条。
+    test('多源结果按「片名 + 年代」聚合，页码取各源最大值', () async {
+      // 两个源返回同名同年代的条目，但 id 不同（各站自增，必然不同）。
       final FakeHttpClient client = FakeHttpClient((RecordedRequest r) {
         final int pg = int.tryParse(r.url.queryParameters['pg'] ?? '1') ?? 1;
+        final int idBase = r.url.host == 'one.com' ? 100 : 200;
         return fakeJson(vodPageJson(
           list: <Map<String, Object>>[
-            vodJson(id: 7, name: '同一部片子'),
+            vodJson(id: idBase + pg, name: '同一部片子', year: '2024'),
           ],
           page: pg,
           pageCount: 2,
@@ -279,10 +421,100 @@ void main() {
       );
 
       expect(store.multiSource, isTrue);
-      expect(store.items, hasLength(1));
+      expect(store.items, hasLength(1), reason: '两个源的同名片只留一条');
+      expect(store.sourceCountOf(store.items.single), 2);
+      expect(store.sourceOf(store.items.single)!.id, s1.id);
       expect(store.pageCount, 2);
       expect(store.canLoadMore, isTrue);
       expect(client.requests, hasLength(2));
+    });
+
+    test('同名但年代不同不合并', () async {
+      final FakeHttpClient client = FakeHttpClient((RecordedRequest r) {
+        final bool first = r.url.host == 'one.com';
+        return fakeJson(vodPageJson(
+          list: <Map<String, Object>>[
+            vodJson(id: first ? 1 : 2, name: '同名片', year: first ? '2024' : '1998'),
+          ],
+          total: 1,
+        ));
+      });
+      useFakeApi(client);
+      final SearchStore store = SearchStore();
+
+      await store.search(
+        keyword: '同名',
+        active: s1,
+        all: <VodSource>[s1, s2],
+        multiSource: true,
+      );
+
+      expect(store.items, hasLength(2), reason: '同名不同年不能当同一部片');
+      expect(store.sourceCountOf(store.items.first), 1);
+    });
+
+    test('片名带「国语版」「(2024)」等尾巴仍能聚合', () async {
+      final FakeHttpClient client = FakeHttpClient((RecordedRequest r) {
+        final bool first = r.url.host == 'one.com';
+        return fakeJson(vodPageJson(
+          list: <Map<String, Object>>[
+            vodJson(
+              id: first ? 1 : 2,
+              // 域名不同，但片名收敛后一致，应该被当成同一部。
+              name: first ? '流浪地球 2 (2023)' : '流浪地球2国语版',
+              year: '2023',
+            ),
+          ],
+          total: 1,
+        ));
+      });
+      useFakeApi(client);
+      final SearchStore store = SearchStore();
+
+      await store.search(
+        keyword: '流浪地球',
+        active: s1,
+        all: <VodSource>[s1, s2],
+        multiSource: true,
+      );
+
+      expect(store.items, hasLength(1));
+      expect(store.sourceCountOf(store.items.single), 2);
+    });
+
+    test('代表条目优先取有播放地址、集数多的那条', () async {
+      final FakeHttpClient client = FakeHttpClient((RecordedRequest r) {
+        final bool first = r.url.host == 'one.com';
+        return fakeJson(vodPageJson(
+          list: <Map<String, Object>>[
+            vodJson(
+              id: first ? 1 : 2,
+              name: '同一部片子',
+              year: '2024',
+              // 第一个源没给播放地址，第二个源给了两集。
+              playFrom: first ? '' : '线路一',
+              playUrl: first ? '' : r'第1集$https://a/1.m3u8#第2集$https://a/2.m3u8',
+            ),
+          ],
+          total: 1,
+        ));
+      });
+      useFakeApi(client);
+      final SearchStore store = SearchStore();
+
+      await store.search(
+        keyword: '片子',
+        active: s1,
+        all: <VodSource>[s1, s2],
+        multiSource: true,
+      );
+
+      final VodItem only = store.items.single;
+      expect(only.hasPlayInfo, isTrue, reason: '应换成有播放地址的那条');
+      expect(only.episodeCount, 2);
+      // 代表换了，来源标签也要跟着换成它所在的源。
+      expect(store.sourceOf(only)!.id, s2.id);
+      expect(store.sourceCountOf(only), 2);
     });
 
     test('多源里单个源失败只丢它自己的结果', () async {

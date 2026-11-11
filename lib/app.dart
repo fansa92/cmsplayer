@@ -8,6 +8,7 @@ import 'state/app_state.dart';
 import 'state/browse_store.dart';
 import 'state/favorites_store.dart';
 import 'state/history_store.dart';
+import 'state/home_store.dart';
 import 'state/rank_store.dart';
 import 'state/search_store.dart';
 import 'state/source_store.dart';
@@ -28,6 +29,9 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
   late final AppState _appState = AppState(widget.settings);
   late final SourceStore _sourceStore = SourceStore(widget.settings);
   late final BrowseStore _browseStore = BrowseStore();
+
+  /// 首页网格上方的三个横排板块。
+  late final HomeStore _homeStore = HomeStore();
   late final SearchStore _searchStore = SearchStore();
   late final FavoritesStore _favoritesStore = FavoritesStore();
   late final HistoryStore _historyStore = HistoryStore();
@@ -67,6 +71,7 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
     _appState.dispose();
     _sourceStore.dispose();
     _browseStore.dispose();
+    _homeStore.dispose();
     _searchStore.dispose();
     _favoritesStore.dispose();
     _historyStore.dispose();
@@ -82,6 +87,7 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
         ChangeNotifierProvider<AppState>.value(value: _appState),
         ChangeNotifierProvider<SourceStore>.value(value: _sourceStore),
         ChangeNotifierProvider<BrowseStore>.value(value: _browseStore),
+        ChangeNotifierProvider<HomeStore>.value(value: _homeStore),
         ChangeNotifierProvider<SearchStore>.value(value: _searchStore),
         ChangeNotifierProvider<FavoritesStore>.value(value: _favoritesStore),
         ChangeNotifierProvider<HistoryStore>.value(value: _historyStore),

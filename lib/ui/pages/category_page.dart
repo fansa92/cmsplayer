@@ -92,29 +92,63 @@ class _CategoryBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<VodCategory> categories = browse.selectableCategories;
+    final bool multi = browse.multiSelect;
+    final Set<int> picked = browse.selectedCategoryIds;
+
     return SizedBox(
       height: 46,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+        padding: const EdgeInsets.fromLTRB(16, 6, 8, 0),
         children: <Widget>[
           Padding(
             padding: const EdgeInsets.only(right: 8),
-            child: ChoiceChip(
-              label: const Text('全部'),
-              selected: browse.typeId == 0,
-              onSelected: (_) => browse.selectCategory(0),
-            ),
+            // 多选模式下「全部」等于清空所有选择，所以用 FilterChip，
+            // 语义上它是"一个都没选"而不是"选中了全部这个分类"。
+            child: multi
+                ? FilterChip(
+                    label: const Text('全部'),
+                    selected: picked.isEmpty,
+                    onSelected: (_) => browse.setCategories(<int>{}),
+                  )
+                : ChoiceChip(
+                    label: const Text('全部'),
+                    selected: browse.typeId == 0,
+                    onSelected: (_) => browse.selectCategory(0),
+                  ),
           ),
           for (final VodCategory c in categories)
             Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text(c.name),
-                selected: browse.typeId == c.id,
-                onSelected: (_) => browse.selectCategory(c.id),
-              ),
+              child: multi
+                  ? FilterChip(
+                      label: Text(c.name),
+                      selected: picked.contains(c.id),
+                      onSelected: (_) => browse.toggleCategory(c.id),
+                    )
+                  : ChoiceChip(
+                      label: Text(c.name),
+                      selected: browse.typeId == c.id,
+                      onSelected: (_) => browse.selectCategory(c.id),
+                    ),
             ),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ActionChip(
+              avatar: Icon(
+                multi ? Icons.done : Icons.checklist_rtl,
+                size: 18,
+                color: multi
+                    ? Theme.of(context).colorScheme.onPrimaryContainer
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              label: Text(multi ? '完成' : '多选'),
+              backgroundColor: multi
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : null,
+              onPressed: () => browse.setMultiSelect(!multi),
+            ),
+          ),
         ],
       ),
     );
@@ -191,6 +225,15 @@ class _FilterBar extends StatelessWidget {
                         },
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    // 「已完结」是开关式筛选，点一下直接生效，不走弹层。
+                    _FilterButton(
+                      label: '已完结',
+                      active: browse.onlyFinished,
+                      showArrow: false,
+                      onTap: () =>
+                          browse.applyFilter(onlyFinished: !browse.onlyFinished),
+                    ),
                     const SizedBox(width: 4),
                     if (browse.hasFilter)
                       IconButton(
@@ -209,7 +252,11 @@ class _FilterBar extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: 8),
               child: Text(
-                '共 ${browse.total} 部 · ${browse.pageNo}/${browse.pageCount} 页',
+                // 已完结是「服务端可能没筛、本地补筛」的，total 和页数
+                // 都是没筛过的数字，摆出来会误导，这里只报已加载条数。
+                browse.onlyFinished
+                    ? '已完结 · 已加载 ${browse.items.length} 部'
+                    : '共 ${browse.total} 部 · ${browse.pageNo}/${browse.pageCount} 页',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -243,11 +290,15 @@ class _FilterButton extends StatelessWidget {
     required this.label,
     required this.active,
     required this.onTap,
+    this.showArrow = true,
   });
 
   final String label;
   final bool active;
   final VoidCallback onTap;
+
+  /// 弹层式筛选带下拉箭头；开关式筛选（已完结）不带。
+  final bool showArrow;
 
   @override
   Widget build(BuildContext context) {
@@ -276,13 +327,14 @@ class _FilterButton extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 2),
-            Icon(
-              Icons.keyboard_arrow_down,
-              size: 16,
-              color: active
-                  ? theme.colorScheme.onPrimaryContainer
-                  : theme.colorScheme.onSurfaceVariant,
-            ),
+            if (showArrow)
+              Icon(
+                Icons.keyboard_arrow_down,
+                size: 16,
+                color: active
+                    ? theme.colorScheme.onPrimaryContainer
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
           ],
         ),
       ),
