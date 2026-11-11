@@ -366,6 +366,73 @@ void main() {
           reason: '空字符串备用地址要被过滤掉');
     });
 
+    test('解析展示类元信息并支持序列化往返', () {
+      final VodItem item = VodItem.fromJson(<String, dynamic>{
+        'vod_id': 7,
+        'vod_name': '元信息',
+        'vod_score': '8.7',
+        'vod_hits': '1.2万',
+        'vod_isend': '1',
+        'vod_serial': '更新至第 12 集',
+        'vod_total': 24,
+        'vod_duration': '45分钟',
+        'vod_pubdate': '2024-05-01',
+        'vod_sub': '别名甲',
+        'vod_letter': 'y',
+        'vod_up': '33',
+        'vod_down': 2,
+      });
+
+      expect(item.score, closeTo(8.7, 1e-9));
+      expect(item.scoreLabel, '8.7');
+      expect(item.hits, 12000, reason: '「万」要换算成具体数字');
+      expect(item.hitsLabel, '1.2万');
+      expect(item.isEnd, isTrue);
+      expect(item.endLabel, '已完结');
+      expect(item.serial, '更新至第 12 集');
+      expect(item.totalEpisodes, 24);
+      expect(item.duration, '45分钟');
+      expect(item.pubDate, '2024-05-01');
+      expect(item.subName, '别名甲');
+      expect(item.letter, 'Y');
+      expect(item.upCount, 33);
+      expect(item.downCount, 2);
+
+      final VodItem back = VodItem.fromJson(item.toJson());
+      expect(back.score, item.score);
+      expect(back.hits, item.hits);
+      expect(back.isEnd, isTrue);
+      expect(back.serial, item.serial);
+      expect(back.totalEpisodes, item.totalEpisodes);
+      expect(back.letter, 'Y');
+    });
+
+    test('没有备注时角标退到更新进度 / 完结状态', () {
+      expect(VodItem(id: 1, name: 'a').badgeText, '');
+      expect(
+        VodItem(id: 1, name: 'a', serial: '更新至 3 集').badgeText,
+        '更新至 3 集',
+      );
+      expect(VodItem(id: 1, name: 'a', isEnd: true).badgeText, '已完结');
+      expect(
+        VodItem(id: 1, name: 'a', isEnd: false, serial: 'x').badgeText,
+        'x',
+        reason: '进度比"连载中"更具体，优先展示',
+      );
+    });
+
+    test('认不出来的 isend 当作「源站没说」', () {
+      final VodItem weird =
+          VodItem.fromJson(<String, dynamic>{'vod_id': 1, 'vod_isend': '未知'});
+      expect(weird.isEnd, isNull);
+      expect(weird.endLabel, isNull);
+
+      final VodItem zero =
+          VodItem.fromJson(<String, dynamic>{'vod_id': 1, 'vod_isend': 0});
+      expect(zero.isEnd, isFalse);
+      expect(zero.endLabel, '连载中');
+    });
+
     test('equality 只看 id，toJson 能还原全部字段', () {
       final VodItem a = VodItem(id: 1, name: '甲');
       final VodItem b = VodItem(id: 1, name: '乙');

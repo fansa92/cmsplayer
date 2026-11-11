@@ -20,6 +20,42 @@ int intOf(Object? value, [int fallback = 0]) {
   return int.tryParse(text) ?? double.tryParse(text)?.round() ?? fallback;
 }
 
+/// 任意类型转浮点数，解析失败或非正数返回 0。
+///
+/// 评分字段在不同源里可能是 `"8.5"`、`8.5`、`"8.5分"`，统一在这里洗掉。
+double doubleOf(Object? value) {
+  if (value == null) return 0;
+  if (value is num) return value.toDouble();
+  final String text = strOf(value);
+  if (text.isEmpty) return 0;
+  final double? direct = double.tryParse(text);
+  if (direct != null) return direct;
+  final Match? m = RegExp(r'\d+(\.\d+)?').firstMatch(text);
+  return m == null ? 0 : (double.tryParse(m.group(0)!) ?? 0);
+}
+
+/// 播放量：多数源给纯数字，少数给 `"1.2万"` / `"12,345"`。
+int hitsOf(Object? value) {
+  final String text = strOf(value).replaceAll(',', '');
+  if (text.isEmpty) return 0;
+  final Match? m = RegExp(r'(\d+(?:\.\d+)?)\s*(万|w|W)?').firstMatch(text);
+  if (m == null) return 0;
+  final double base = double.tryParse(m.group(1)!) ?? 0;
+  final String unit = m.group(2) ?? '';
+  final double factor = unit.isEmpty ? 1 : 10000;
+  return (base * factor).round();
+}
+
+/// 播放量的人话表达：`12345` → `1.2万`。
+String formatHits(int hits) {
+  if (hits <= 0) return '';
+  if (hits < 10000) return '$hits';
+  final double wan = hits / 10000;
+  final String text =
+      wan >= 100 ? wan.toStringAsFixed(0) : wan.toStringAsFixed(1);
+  return '${text.endsWith('.0') ? text.substring(0, text.length - 2) : text}万';
+}
+
 /// 去掉 HTML 标签并解码实体，简介 / 演员字段会带 `<p>`、`<br>`。
 String stripHtml(String? input) {
   if (input == null || input.isEmpty) return '';

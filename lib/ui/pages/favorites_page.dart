@@ -21,6 +21,27 @@ class FavoritesPage extends StatefulWidget {
 class _FavoritesPageState extends State<FavoritesPage> {
   bool _onlyCurrentSource = true;
 
+  /// 只看有更新的。
+  bool _onlyUpdated = false;
+
+  /// 更新检查只在本页第一次拿到数据时触发一次。
+  bool _checkRequested = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_checkRequested) return;
+    final FavoritesStore favorites = context.watch<FavoritesStore>();
+    if (favorites.loading) return;
+    _checkRequested = true;
+    final List<VodSource> sources = context.read<SourceStore>().sources;
+    // checkUpdates 会立刻 notify，不能在 build/didChangeDependencies 阶段同步调，
+    // 推到帧尾。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) favorites.checkUpdates(sources: sources);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final FavoritesStore favorites = context.watch<FavoritesStore>();
@@ -30,9 +51,12 @@ class _FavoritesPageState extends State<FavoritesPage> {
 
     final VodSource? active = sourceStore.active;
     final List<FavoriteItem> all = favorites.items;
-    final List<FavoriteItem> visible = _onlyCurrentSource && active != null
+    final List<FavoriteItem> scoped = _onlyCurrentSource && active != null
         ? all.where((FavoriteItem e) => e.sourceId == active.id).toList()
         : all;
+    final List<FavoriteItem> visible = _onlyUpdated
+        ? scoped.where((FavoriteItem e) => favorites.hasUpdate(e.key)).toList()
+        : scoped;
 
     if (all.isEmpty) {
       return const EmptyState(
@@ -52,15 +76,27 @@ class _FavoritesPageState extends State<FavoritesPage> {
         children: <Widget>[
           _Toolbar(
             total: all.length,
+            updated: favorites.updatedCount,
+            onlyUpdated: _onlyUpdated,
             onlyCurrentSource: _onlyCurrentSource,
+            checking: favorites.checking,
             onChanged: (bool v) => setState(() => _onlyCurrentSource = v),
+            onOnlyUpdated: (bool v) => setState(() => _onlyUpdated = v),
+            onCheck: () => favorites.checkUpdates(
+              sources: sourceStore.sources,
+              force: true,
+            ),
             onClear: () => _confirmClear(context, favorites, all.length),
           ),
-          const Expanded(
+          Expanded(
             child: EmptyState(
-              icon: Icons.favorite_border,
-              title: '当前资源站没有收藏',
-              subtitle: '关掉上面的筛选开关，可以查看其它源的收藏。',
+              icon: _onlyUpdated
+                  ? Icons.check_circle_outline
+                  : Icons.favorite_border,
+              title: _onlyUpdated ? '没有需要追的更新' : '当前资源站没有收藏',
+              subtitle: _onlyUpdated
+                  ? '关掉「有更新」筛选，可以看到全部收藏。'
+                  : '关掉上面的筛选开关，可以查看其它源的收藏。',
             ),
           ),
         ],
@@ -71,8 +107,16 @@ class _FavoritesPageState extends State<FavoritesPage> {
       children: <Widget>[
         _Toolbar(
           total: all.length,
+          updated: favorites.updatedCount,
+          onlyUpdated: _onlyUpdated,
           onlyCurrentSource: _onlyCurrentSource,
+          checking: favorites.checking,
           onChanged: (bool v) => setState(() => _onlyCurrentSource = v),
+          onOnlyUpdated: (bool v) => setState(() => _onlyUpdated = v),
+          onCheck: () => favorites.checkUpdates(
+            sources: sourceStore.sources,
+            force: true,
+          ),
           onClear: () => _confirmClear(context, favorites, all.length),
         ),
         Expanded(
@@ -80,7 +124,13 @@ class _FavoritesPageState extends State<FavoritesPage> {
             items: visible.map(_toItem).toList(),
             sourceLabelOf: (VodItem item) =>
                 _sourceNameOf(sourceStore, byVodId[item.id]?.sourceId ?? ''),
-            onTap: (VodItem item) {
+            updateLabelOf: (VodItem item) {
+              final FavoriteItem? fav = byVodId[item.id];
+              if (fav == null || !favorites.hasUpdate(fav.key)) return null;
+              final int? latest = favorites.latestEpisodesOf(fav.key);
+              return latest == null ? '有更新' : '更新至 $latest 集';
+            },
+            onTap: (VodItem item) async {
               final FavoriteItem? fav = byVodId[item.id];
               final VodSource? source =
                   fav == null ? null : _sourceById(sourceStore, fav.sourceId);
@@ -88,6 +138,11 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 AppActions.snack(context, '对应的资源站已被删除');
                 return;
               }
+              if (fav != null) {
+                // 点开就算看过了：基线推进到最新集数，角标消失。
+                await favorites.markSeen(fav.key);
+              }
+              if (!context.mounted) return;
               AppActions.openMinimalItem(
                 context,
                 source: source,
@@ -153,14 +208,24 @@ class _FavoritesPageState extends State<FavoritesPage> {
 class _Toolbar extends StatelessWidget {
   const _Toolbar({
     required this.total,
+    required this.updated,
+    required this.onlyUpdated,
     required this.onlyCurrentSource,
+    required this.checking,
     required this.onChanged,
+    required this.onOnlyUpdated,
+    required this.onCheck,
     required this.onClear,
   });
 
   final int total;
+  final int updated;
+  final bool onlyUpdated;
   final bool onlyCurrentSource;
+  final bool checking;
   final ValueChanged<bool> onChanged;
+  final ValueChanged<bool> onOnlyUpdated;
+  final VoidCallback onCheck;
   final VoidCallback onClear;
 
   @override
@@ -168,25 +233,56 @@ class _Toolbar extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 8, 2),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(
-            '共 $total 部',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  updated > 0 ? '共 $total 部 · $updated 部有更新' : '共 $total 部',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: '检查更新',
+                visualDensity: VisualDensity.compact,
+                onPressed: checking ? null : onCheck,
+                icon: checking
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sync, size: 20),
+              ),
+              IconButton(
+                tooltip: '清空收藏',
+                visualDensity: VisualDensity.compact,
+                onPressed: onClear,
+                icon: const Icon(Icons.delete_sweep_outlined, size: 20),
+              ),
+            ],
           ),
-          const Spacer(),
-          FilterChip(
-            label: const Text('仅当前源'),
-            selected: onlyCurrentSource,
-            onSelected: onChanged,
-          ),
-          IconButton(
-            tooltip: '清空收藏',
-            visualDensity: VisualDensity.compact,
-            onPressed: onClear,
-            icon: const Icon(Icons.delete_sweep_outlined, size: 20),
+          Wrap(
+            spacing: 8,
+            children: <Widget>[
+              FilterChip(
+                label: const Text('仅当前源'),
+                selected: onlyCurrentSource,
+                onSelected: onChanged,
+              ),
+              if (updated > 0)
+                FilterChip(
+                  label: Text('有更新 $updated'),
+                  selected: onlyUpdated,
+                  onSelected: onOnlyUpdated,
+                ),
+            ],
           ),
         ],
       ),

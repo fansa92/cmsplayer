@@ -289,4 +289,30 @@ void main() {
       expect(throttler.shouldRun, isTrue);
     });
   });
+
+  group('影片元信息格式化', () {
+    test('doubleOf 容忍单位与脏字符', () {
+      expect(doubleOf(null), 0);
+      expect(doubleOf(''), 0);
+      expect(doubleOf('8.5分'), 8.5);
+      expect(doubleOf('8.5'), 8.5);
+      expect(doubleOf(7), 7);
+      expect(doubleOf('abc'), 0);
+    });
+
+    test('hitsOf 支持千分位与「万」', () {
+      expect(hitsOf('12,345'), 12345);
+      expect(hitsOf('1.2万'), 12000);
+      expect(hitsOf(88), 88);
+      expect(hitsOf('—'), 0);
+    });
+
+    test('formatHits 小于一万原样，超过换算成万', () {
+      expect(formatHits(0), '');
+      expect(formatHits(999), '999');
+      expect(formatHits(10000), '1万');
+      expect(formatHits(12345), '1.2万');
+      expect(formatHits(1234000), '123万');
+    });
+  });
 }

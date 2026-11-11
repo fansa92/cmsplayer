@@ -180,6 +180,19 @@ class VodRepository {
     );
   }
 
+  /// 批量拉详情，一次请求取回多部影片的最新状态。
+  ///
+  /// 只给「收藏更新检查」用，所以**刻意不走缓存**：这个场景要的就是
+  /// 最新集数，命中十分钟前的缓存等于没检查。每次检查对每个源只发一次
+  /// 请求，重复调用也不至于打爆接口。
+  Future<List<VodItem>> detailsByIds({
+    required VodSource source,
+    required List<int> ids,
+  }) async {
+    if (ids.isEmpty) return const <VodItem>[];
+    return _api(source).detailsByIds(ids);
+  }
+
   /// 重试当前失败的请求（清空该源的缓存）。
   void invalidateSource(String sourceId) {
     _pages.removeWhere(

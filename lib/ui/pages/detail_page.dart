@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart' show SliverConstraints;
 import 'package:provider/provider.dart';
 
 import '../../core/utils/responsive.dart';
+import '../../data/models/paged_result.dart';
 import '../../data/models/play_line.dart';
 import '../../data/models/play_record.dart';
 import '../../data/models/play_task.dart';
@@ -17,6 +18,7 @@ import '../../state/history_store.dart';
 import '../actions.dart';
 import '../navigation.dart';
 import '../widgets/cached_image.dart';
+import '../widgets/vod_grid.dart';
 
 /// 详情页：影片信息 + 多线路多选集 + 收藏 + 续播。
 ///
@@ -63,6 +65,10 @@ class _DetailPageState extends State<DetailPage> {
   /// 待滚动的目标（线路 + 集），首帧布局完成后消费。
   ({int line, int episode})? _pendingResume;
 
+  /// 「相似推荐」横条的数据。拉不到就整块不显示，不必打扰用户。
+  List<VodItem> _similar = <VodItem>[];
+  bool _similarLoading = false;
+
   /// 选集网格最近一次布局的度量，供 [_scrollToPendingResume] 算偏移。
   double? _gridPreceding;
   double? _gridCrossExtent;
@@ -74,6 +80,8 @@ class _DetailPageState extends State<DetailPage> {
     if (!_item.hasPlayInfo) {
       _loadDetail();
     }
+    // list 模式下多半已经带 type_id；没有的话等详情补回来再拉一次。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeLoadSimilar());
   }
 
   @override
@@ -101,12 +109,47 @@ class _DetailPageState extends State<DetailPage> {
           _error = '该资源站没有返回播放地址';
         }
       });
+      // 详情回来了才可能拿到 type_id。
+      _maybeLoadSimilar();
     } on Object catch (e) {
       if (!mounted) return;
       setState(() {
         _loadingDetail = false;
         _error = e.toString();
       });
+    }
+  }
+
+  // ---------------------------------------------------------------- 相似推荐
+
+  /// 拉同分类下的其它影片。
+  ///
+  /// 只做一次，失败就静默放弃：推荐位是锦上添花，为了让它在详情页末尾
+  /// 冒出来而弹一个错误提示并不划算。
+  Future<void> _maybeLoadSimilar() async {
+    if (!mounted || _similarLoading || _similar.isNotEmpty) return;
+    final int typeId = _item.typeId;
+    if (typeId <= 0) return;
+
+    _similarLoading = true;
+    try {
+      final VodPage page = await VodRepository.instance.query(
+        source: widget.source,
+        typeId: typeId,
+        pageSize: 12,
+        detail: true,
+      );
+      if (!mounted) return;
+      setState(() {
+        _similar = page.items
+            .where((VodItem e) => e.id != _item.id)
+            .take(10)
+            .toList(growable: false);
+      });
+    } on Object {
+      // 忽略：没有推荐位不影响正常观看。
+    } finally {
+      _similarLoading = false;
     }
   }
 
@@ -197,6 +240,8 @@ class _DetailPageState extends State<DetailPage> {
     final List<Widget> mainSlivers = <Widget>[
       SliverToBoxAdapter(child: _buildHeader(theme)),
       ..._buildEpisodeSlivers(theme, record),
+      if (_similar.isNotEmpty)
+        SliverToBoxAdapter(child: _buildSimilar(theme)),
       SliverToBoxAdapter(child: _buildFooter(theme)),
     ];
 
@@ -300,13 +345,31 @@ class _DetailPageState extends State<DetailPage> {
           ],
         ),
         const SizedBox(height: 10),
-        _MetaChips(item: _item),
+        _MetaChips(
+          item: _item,
+          onTypeTap: _item.typeId <= 0 || _item.typeName.isEmpty
+              ? null
+              : () => AppRoutes.openCategory(
+                    context,
+                    source: widget.source,
+                    typeId: _item.typeId,
+                    title: _item.typeName,
+                  ),
+        ),
         if (_item.director.isNotEmpty || _item.actor.isNotEmpty) ...<Widget>[
           const SizedBox(height: 12),
           if (_item.director.isNotEmpty)
-            _InfoLine(label: '导演', value: _item.director),
+            _PeopleLine(
+              label: '导演',
+              names: _splitNames(_item.director),
+              onTap: _openName,
+            ),
           if (_item.actor.isNotEmpty)
-            _InfoLine(label: '演员', value: _item.actor),
+            _PeopleLine(
+              label: '演员',
+              names: _splitNames(_item.actor),
+              onTap: _openName,
+            ),
         ],
         if (_item.content.isNotEmpty) ...<Widget>[
           const SizedBox(height: 12),
@@ -334,6 +397,54 @@ class _DetailPageState extends State<DetailPage> {
         ],
         const SizedBox(height: 20),
       ],
+    );
+  }
+
+  Widget _buildSimilar(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  '相似推荐',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (_item.typeName.isNotEmpty)
+                TextButton(
+                  onPressed: _item.typeId <= 0
+                      ? null
+                      : () => AppRoutes.openCategory(
+                            context,
+                            source: widget.source,
+                            typeId: _item.typeId,
+                            title: _item.typeName,
+                          ),
+                  child: const Text('更多'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // 详情页本身已经有 16 的页边距，横条不再重复留白，只把左侧对齐。
+          VodRow(
+            items: _similar,
+            headers: widget.source.headers,
+            itemWidth: 96,
+            padding: EdgeInsets.zero,
+            onTap: (VodItem item) => AppRoutes.openDetail(
+              context,
+              item: item,
+              source: widget.source,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -519,7 +630,11 @@ class _DetailPageState extends State<DetailPage> {
               children: <Widget>[
                 Expanded(
                   child: Text(
-                    '${line.name} · 共 ${line.episodes.length} 集',
+                    <String>[
+                      line.name,
+                      '共 ${line.episodes.length} 集',
+                      if (_item.endLabel != null) _item.endLabel!,
+                    ].join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
@@ -613,6 +728,27 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
+  /// 点演员 / 导演名，看同一个源里还有哪些他/她的片子。
+  void _openName(String name) {
+    final String keyword = name.trim();
+    if (keyword.isEmpty || keyword == '等') return;
+    AppRoutes.openKeyword(context, source: widget.source, keyword: keyword);
+  }
+
+  /// 把 `"张三,李四/王五"` 拆成一个个可点的名字。
+  ///
+  /// 各个源的分隔符五花八门，逗号、顿号、斜杠都用过；名字太多时只留前
+  /// 六个，剩下的用「等」带过，否则一行标签能把简介挤到屏幕外。
+  static List<String> _splitNames(String raw) {
+    final List<String> parts = raw
+        .split(RegExp(r'[,，/、|]+'))
+        .map((String e) => e.trim())
+        .where((String e) => e.isNotEmpty && e != '未知' && e != '暂无')
+        .toList(growable: false);
+    if (parts.length <= 6) return parts;
+    return <String>[...parts.take(6), '等'];
+  }
+
   int _clamp(int value, int length) {
     if (length <= 0) return 0;
     return value < 0 ? 0 : (value >= length ? length - 1 : value);
@@ -666,9 +802,12 @@ class _EpisodeButton extends StatelessWidget {
 }
 
 class _MetaChips extends StatelessWidget {
-  const _MetaChips({required this.item});
+  const _MetaChips({required this.item, this.onTypeTap});
 
   final VodItem item;
+
+  /// 点分类名时触发；为 null 时分类标签不可点。
+  final VoidCallback? onTypeTap;
 
   @override
   Widget build(BuildContext context) {
@@ -678,41 +817,92 @@ class _MetaChips extends StatelessWidget {
       if (item.year.isNotEmpty) item.year,
       if (item.area.isNotEmpty) item.area,
       if (item.lang.isNotEmpty) item.lang,
+      if (item.duration.isNotEmpty) item.duration,
+      if (item.hitsLabel.isNotEmpty) '${item.hitsLabel}次播放',
+      if (item.endLabel != null) item.endLabel!,
     ];
-    if (parts.isEmpty) return const SizedBox.shrink();
+    if (parts.isEmpty && item.scoreLabel.isEmpty) return const SizedBox.shrink();
+
+    // 琥珀色在深色底上要用浅一档，否则对比度不足。
+    final Color scoreColor = theme.brightness == Brightness.dark
+        ? Colors.amber.shade300
+        : Colors.amber.shade800;
+
+    // 分类标签可点，其余（年代 / 地区 / 片长 / 播放量）只是信息。
+    Widget chip(String text, {VoidCallback? onTap}) {
+      final Widget box = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          text,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: onTap == null
+                ? theme.colorScheme.onSurfaceVariant
+                : theme.colorScheme.primary,
+          ),
+        ),
+      );
+      if (onTap == null) return box;
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: box,
+      );
+    }
 
     return Wrap(
       spacing: 8,
       runSpacing: 6,
       children: <Widget>[
-        for (final String p in parts)
+        if (item.scoreLabel.isNotEmpty)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
+              color: Colors.amber.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Text(
-              p,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(Icons.star_rounded, size: 14, color: scoreColor),
+                const SizedBox(width: 2),
+                Text(
+                  item.scoreLabel,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: scoreColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ),
           ),
+        for (final String p in parts)
+          chip(p, onTap: p == item.typeName ? onTypeTap : null),
       ],
     );
   }
 }
 
-class _InfoLine extends StatelessWidget {
-  const _InfoLine({required this.label, required this.value});
+/// 导演 / 演员一行：每个名字都是可点的，点进去看该名字在这个源下的作品。
+class _PeopleLine extends StatelessWidget {
+  const _PeopleLine({
+    required this.label,
+    required this.names,
+    required this.onTap,
+  });
 
   final String label;
-  final String value;
+  final List<String> names;
+  final ValueChanged<String> onTap;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final TextStyle? style = theme.textTheme.bodySmall?.copyWith(height: 1.5);
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
@@ -720,17 +910,51 @@ class _InfoLine extends StatelessWidget {
         children: <Widget>[
           SizedBox(
             width: 42,
-            child: Text(
-              label,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                label,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ),
           Expanded(
-            child: Text(
-              value,
-              style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
+            child: Wrap(
+              spacing: 2,
+              runSpacing: 2,
+              children: <Widget>[
+                for (final String name in names)
+                  if (name == '等')
+                    Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      child: Text(
+                        name,
+                        style: style?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  else
+                    InkWell(
+                      onTap: () => onTap(name),
+                      borderRadius: BorderRadius.circular(4),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
+                        child: Text(
+                          name,
+                          style: style?.copyWith(
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+              ],
             ),
           ),
         ],

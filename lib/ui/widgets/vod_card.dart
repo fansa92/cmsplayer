@@ -12,6 +12,7 @@ class VodCard extends StatelessWidget {
     this.headers = const <String, String>{},
     this.progress = 0,
     this.sourceLabel,
+    this.updateLabel,
   });
 
   final VodItem item;
@@ -24,15 +25,23 @@ class VodCard extends StatelessWidget {
   /// 多源搜索时展示来源站点名。
   final String? sourceLabel;
 
+  /// 左下角的更新提示（如「更新至 12 集」），收藏页用。
+  final String? updateLabel;
+
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final String? badge =
-        item.remarks.isEmpty ? null : _trimBadge(item.remarks);
+    final String badgeRaw = item.badgeText;
+    final String? badge = badgeRaw.isEmpty ? null : _trimBadge(badgeRaw);
+    final String score = item.scoreLabel;
     final double ratio = progress.clamp(0.0, 1.0);
     final String semanticLabel = <String>[
       item.name,
       if (badge != null) badge,
+      if (score.isNotEmpty) '评分 $score',
+      if (item.hitsLabel.isNotEmpty) '播放 ${item.hitsLabel}',
+      if (item.endLabel != null) item.endLabel!,
+      if (updateLabel != null) updateLabel!,
       if (sourceLabel != null) sourceLabel!,
     ].join('，');
 
@@ -59,6 +68,30 @@ class VodCard extends StatelessWidget {
                         headers: headers,
                         borderRadius: BorderRadius.circular(10),
                       ),
+                      if (score.isNotEmpty)
+                        Positioned(
+                          top: 6,
+                          left: 6,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              score,
+                              style: TextStyle(
+                                fontSize: 10,
+                                height: 1.3,
+                                color: Colors.amber.shade300,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
                       if (badge != null)
                         Positioned(
                           top: 6,
@@ -81,6 +114,32 @@ class VodCard extends StatelessWidget {
                                 height: 1.3,
                                 color: Colors.white,
                                 fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (updateLabel != null)
+                        Positioned(
+                          left: 6,
+                          bottom: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primary,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              updateLabel!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10,
+                                height: 1.3,
+                                color: theme.colorScheme.onPrimary,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),

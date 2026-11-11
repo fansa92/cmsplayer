@@ -4,6 +4,7 @@ import '../data/models/play_task.dart';
 import '../data/models/vod_item.dart';
 import '../data/models/vod_source.dart';
 import 'pages/detail_page.dart';
+import 'pages/keyword_page.dart';
 import 'pages/rank_page.dart';
 import 'pages/source_page.dart';
 import 'player/player_page.dart';
@@ -50,6 +51,41 @@ class AppRoutes {
   static Future<void> openRank(BuildContext context) {
     return Navigator.of(context).push<void>(
       MaterialPageRoute<void>(builder: (_) => const RankPage()),
+    );
+  }
+
+  /// 按演员 / 导演名看同一个源里还有哪些片子。
+  static Future<void> openKeyword(
+    BuildContext context, {
+    required VodSource source,
+    required String keyword,
+  }) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => KeywordPage(
+          source: source,
+          title: keyword,
+          keyword: keyword,
+        ),
+      ),
+    );
+  }
+
+  /// 按分类看更多（详情页点分类标签）。
+  static Future<void> openCategory(
+    BuildContext context, {
+    required VodSource source,
+    required int typeId,
+    required String title,
+  }) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => KeywordPage(
+          source: source,
+          title: title,
+          typeId: typeId,
+        ),
+      ),
     );
   }
 }

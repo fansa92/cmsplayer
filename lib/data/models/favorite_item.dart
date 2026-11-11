@@ -11,6 +11,7 @@ class FavoriteItem {
     this.vodPic = '',
     this.typeName = '',
     this.remarks = '',
+    this.episodes = 0,
     required this.createdAt,
   });
 
@@ -23,6 +24,13 @@ class FavoriteItem {
   final String vodPic;
   final String typeName;
   final String remarks;
+
+  /// 收藏时的集数，用来和最新集数比对得出「有更新」。
+  ///
+  /// 老数据没有这个字段（0）：第一次检查会把当前集数当作基线写回，
+  /// 不产生"全员有更新"的误报。
+  final int episodes;
+
   final DateTime createdAt;
 
   factory FavoriteItem.fromVod({
@@ -33,6 +41,7 @@ class FavoriteItem {
     String vodPic = '',
     String typeName = '',
     String remarks = '',
+    int episodes = 0,
     DateTime? createdAt,
   }) {
     final String id = vodId.toString();
@@ -45,6 +54,7 @@ class FavoriteItem {
       vodPic: vodPic,
       typeName: typeName,
       remarks: remarks,
+      episodes: episodes,
       createdAt: createdAt ?? DateTime.now(),
     );
   }
@@ -61,9 +71,23 @@ class FavoriteItem {
       vodPic: strOf(json['vodPic']),
       typeName: strOf(json['typeName']),
       remarks: strOf(json['remarks']),
+      episodes: intOf(json['episodes']),
       createdAt: DateTime.tryParse(strOf(json['createdAt'])) ?? DateTime.now(),
     );
   }
+
+  FavoriteItem copyWith({int? episodes, String? remarks}) => FavoriteItem(
+        key: key,
+        sourceId: sourceId,
+        sourceName: sourceName,
+        vodId: vodId,
+        vodName: vodName,
+        vodPic: vodPic,
+        typeName: typeName,
+        remarks: remarks ?? this.remarks,
+        episodes: episodes ?? this.episodes,
+        createdAt: createdAt,
+      );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'key': key,
@@ -74,6 +98,7 @@ class FavoriteItem {
         'vodPic': vodPic,
         'typeName': typeName,
         'remarks': remarks,
+        'episodes': episodes,
         'createdAt': createdAt.toIso8601String(),
       };
 }

@@ -132,6 +132,9 @@ class K {
   static const int defaultGridCrossAxisMobile = 3;
   static const int defaultGridCrossAxisDesktop = 6;
 
+  /// 收藏更新检查的最小间隔。进收藏页都会尝试检查一次，靠它限频。
+  static const Duration favoriteCheckInterval = Duration(hours: 6);
+
   /// 分类筛选项：排序方式（macCMS 的 `by` 参数）。
   static const Map<String, String> sortOptions = <String, String>{
     'time': '最新更新',

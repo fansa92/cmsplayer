@@ -17,6 +17,7 @@ class VodGrid extends StatefulWidget {
     this.loadingMore = false,
     this.progressOf,
     this.sourceLabelOf,
+    this.updateLabelOf,
     this.padding = const EdgeInsets.fromLTRB(16, 8, 16, 24),
     this.header,
   });
@@ -29,6 +30,9 @@ class VodGrid extends StatefulWidget {
   final bool loadingMore;
   final double Function(VodItem item)? progressOf;
   final String Function(VodItem item)? sourceLabelOf;
+
+  /// 海报左下角的更新提示，返回 null 表示这条没有更新。
+  final String? Function(VodItem item)? updateLabelOf;
   final EdgeInsets padding;
 
   /// 网格上方的附加内容（例如首页的「继续观看」横条）。
@@ -115,6 +119,8 @@ class _VodGridState extends State<VodGrid> {
         progress: widget.progressOf == null ? 0 : widget.progressOf!(item),
         sourceLabel:
             widget.sourceLabelOf == null ? null : widget.sourceLabelOf!(item),
+        updateLabel:
+            widget.updateLabelOf == null ? null : widget.updateLabelOf!(item),
       );
     }
 
@@ -156,12 +162,17 @@ class VodRow extends StatelessWidget {
     required this.onTap,
     this.headers = const <String, String>{},
     this.itemWidth = 120,
+    this.padding = const EdgeInsets.symmetric(horizontal: 16),
   });
 
   final List<VodItem> items;
   final void Function(VodItem item) onTap;
   final Map<String, String> headers;
   final double itemWidth;
+
+  /// 横向留白。放在详情页这类已经有页面边距的地方时传 `EdgeInsets.zero`，
+  /// 否则会变成两层 16 叠在一起。
+  final EdgeInsets padding;
 
   @override
   Widget build(BuildContext context) {
@@ -170,7 +181,7 @@ class VodRow extends StatelessWidget {
       height: itemWidth / 0.62,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: padding,
         itemCount: items.length,
         separatorBuilder: (_, __) => const SizedBox(width: 12),
         itemBuilder: (BuildContext context, int index) {
