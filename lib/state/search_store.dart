@@ -22,6 +22,10 @@ class SearchStore extends ChangeNotifier {
   int _pageCount = 1;
   bool _multiSource = false;
   List<String> _history = <String>[];
+  List<String> _suggestions = <String>[];
+
+  /// 最近一次联想请求的令牌，防止慢回来的旧结果盖掉新输入的结果。
+  String _suggestToken = '';
   bool _historyLoaded = false;
   bool _disposed = false;
 
@@ -35,6 +39,7 @@ class SearchStore extends ChangeNotifier {
   bool get multiSource => _multiSource;
   bool get hasResult => _items.isNotEmpty;
   List<String> get history => _history;
+  List<String> get suggestions => _suggestions;
 
   /// 结果条目所属的源（多源搜索时用于展示来源标签）。
   ///
@@ -98,9 +103,43 @@ class SearchStore extends ChangeNotifier {
     _query = '';
     _items = <VodItem>[];
     _groupSources.clear();
+    _suggestions = <String>[];
+    _suggestToken = '';
     _error = null;
     _pageNo = 1;
     _pageCount = 1;
+    _emit();
+  }
+
+  // ---------------------------------------------------------------- 联想词
+
+  void clearSuggestions() {
+    if (_suggestions.isEmpty && _suggestToken.isEmpty) return;
+    _suggestions = <String>[];
+    _suggestToken = '';
+    _emit();
+  }
+
+  /// 拉一批联想词。失败一律静默：联想不出来不该让搜索框报错。
+  ///
+  /// 去抖放在页面层；这里的令牌负责挡住「输入 A 的慢请求回来时用户已经
+  /// 敲到 ABC」这类乱序，避免展示一串和当前输入无关的词。
+  Future<void> suggest(String keyword, VodSource? source) async {
+    final String q = keyword.trim();
+    if (q.isEmpty || source == null) {
+      clearSuggestions();
+      return;
+    }
+    final String token = '${source.id}|$q';
+    _suggestToken = token;
+    List<String> words = <String>[];
+    try {
+      words = await VodRepository.instance.suggest(source: source, keyword: q);
+    } on Object catch (e) {
+      AppLog.d('Search', 'suggest failed: $e');
+    }
+    if (_disposed || _suggestToken != token) return;
+    _suggestions = words;
     _emit();
   }
 
@@ -155,6 +194,9 @@ class SearchStore extends ChangeNotifier {
     _multiSource = multiSource;
     _loading = true;
     _error = null;
+    // 已经按回车搜索了，联想条就该收起来；同时让在途的联想请求失效。
+    _suggestions = <String>[];
+    _suggestToken = '$q|submitted';
     if (pageNo <= 1) {
       _items = <VodItem>[];
       _groupSources.clear();

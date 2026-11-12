@@ -34,7 +34,19 @@ class CategoryPage extends StatelessWidget {
         if (browse.selectableCategories.isNotEmpty)
           _CategoryBar(browse: browse),
         _FilterBar(browse: browse),
-        Expanded(child: _buildBody(context, browse, source, headers, history)),
+        Expanded(
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: _buildBody(context, browse, source, headers, history),
+              ),
+              // 只有源站真的给了首字母才显示侧栏，否则一排点不动的字母
+              // 比没有还糟。少于两个字母也没必要占一条 32px 的宽度。
+              if (browse.availableLetters.length >= 2)
+                _LetterRail(browse: browse),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -226,6 +238,16 @@ class _FilterBar extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
+                    // 排序方向：macCMS 的 `by` 只挑字段，`order` 才管升降。
+                    _FilterButton(
+                      label: browse.order == 'asc' ? '正序 ↑' : '倒序 ↓',
+                      active: browse.order.isNotEmpty,
+                      showArrow: false,
+                      onTap: () => browse.applyFilter(
+                        order: browse.order == 'asc' ? 'desc' : 'asc',
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     // 「已完结」是开关式筛选，点一下直接生效，不走弹层。
                     _FilterButton(
                       label: '已完结',
@@ -282,6 +304,65 @@ class _FilterBar extends StatelessWidget {
     );
     if (result == null) return;
     apply(result);
+  }
+}
+
+/// A–Z 侧栏：按源站给的 `vod_letter`（或英文名首字母）快速跳转。
+///
+/// 「全」在顶部，等于清空 letter 条件。侧栏字母来自未经本地筛选的原始
+/// 结果，所以选中某一个字母后仍然能切到别的字母。
+class _LetterRail extends StatelessWidget {
+  const _LetterRail({required this.browse});
+
+  final BrowseStore browse;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme colors = theme.colorScheme;
+    final List<String> letters = browse.availableLetters;
+
+    Widget cell(String label, String value, bool active) => InkWell(
+          onTap: () => browse.applyFilter(letter: value),
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            width: 26,
+            height: 24,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: active ? colors.primaryContainer : null,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: active
+                    ? colors.onPrimaryContainer
+                    : colors.onSurfaceVariant,
+                fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ),
+        );
+
+    return Container(
+      width: 32,
+      padding: const EdgeInsets.only(right: 4),
+      alignment: Alignment.center,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            cell('全', '', browse.letter.isEmpty),
+            for (final String l in letters)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: cell(l, l, browse.letter == l),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

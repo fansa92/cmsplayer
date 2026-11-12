@@ -150,6 +150,7 @@ void useIsolatedStores() {
     JsonStore.overrideDirectory = dir;
     SharedPreferences.setMockInitialValues(<String, Object>{});
     VodRepository.instance.clearAll();
+    MacCmsApi.resetCompatForTest();
     await SyncTombstones.instance.clearAll();
   });
 

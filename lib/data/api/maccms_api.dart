@@ -6,10 +6,12 @@ import 'package:http/http.dart' as http;
 import '../../core/errors.dart';
 import '../../core/logger.dart';
 import '../../core/utils/encoding.dart';
+import '../../core/utils/text_utils.dart';
 import '../models/paged_result.dart';
 import '../models/vod_category.dart';
 import '../models/vod_item.dart';
 import '../models/vod_source.dart';
+import 'xml_vod_parser.dart';
 
 /// 热播榜单的时间窗。
 enum HotWindow {
@@ -33,8 +35,13 @@ enum HotWindow {
 /// | `wd` | 关键词搜索 |
 /// | `ids` | 按 ID 查询，逗号分隔 |
 /// | `year` / `area` / `lang` | 年代 / 地区 / 语言 |
-/// | `by` | 排序：`time` / `hits` / `score` / `input`（部分源不响应，见下） |
+/// | `by` / `order` | 排序字段 / 排序方向（`asc` / `desc`） |
+/// | `letter` | 片名首字母，A–Z |
 /// | `h` / `m` | 24 小时 / 本月热播 |
+/// | `at` | 输出格式，默认 `json`；老站返回 XML 时另走 [XmlVodParser] |
+///
+/// `ac` 的第三个取值 `videolist` 是老采集接口的全字段模式，按 ID 取详情
+/// 失败或没带播放地址时会自动重试，详见 [_fetchDetailByIds]。
 class MacCmsApi {
   MacCmsApi(this.source, {http.Client? client}) : _client = client ?? _shared;
 
@@ -42,6 +49,24 @@ class MacCmsApi {
 
   final VodSource source;
   final http.Client _client;
+
+  // ------------------------------------------------------------ 兼容性记忆
+
+  /// 每个源记住「哪种 ac 真的能拿到播放地址」，默认 `detail`。
+  static final Map<String, String> _detailAction = <String, String>{};
+
+  /// 两种动作都拿不到播放地址的源，不再每次详情都白试一遍。
+  static final Set<String> _detailFallbackTried = <String>{};
+
+  /// REST 联想词接口不可用的源，后续直接走 Provide 兜底。
+  static final Set<String> _restSuggestUnsupported = <String>{};
+
+  /// 测试收尾时清掉会话级记忆，避免用例之间互相影响。
+  static void resetCompatForTest() {
+    _detailAction.clear();
+    _detailFallbackTried.clear();
+    _restSuggestUnsupported.clear();
+  }
 
   // ---------------------------------------------------------------- 基础
 
@@ -66,17 +91,9 @@ class MacCmsApi {
     return base.replace(queryParameters: merged);
   }
 
-  Future<VodPage> _fetch(Map<String, String> params) async {
-    final String pageSize = params['pagesize'] ?? params['limit'] ?? '20';
-    final Map<String, String> finalParams = <String, String>{
-      ...params,
-      'pagesize': pageSize,
-      'limit': pageSize,
-    };
-
-    final Uri uri = _uri(finalParams);
+  /// 发一次 GET，按字节解码后返回文本。错误统一包成 [VodException]。
+  Future<String> _get(Uri uri) async {
     AppLog.d('MacCms', 'GET $uri');
-
     try {
       final http.Request request = http.Request('GET', uri);
       request.headers.addAll(source.headers);
@@ -94,19 +111,76 @@ class MacCmsApi {
       // 不用 response.body：它只按 UTF-8 / Latin-1 解码，遇到 GBK 老站
       // 会直接抛 FormatException。改成自己按字节解码，编码优先级见
       // [ResponseDecoder]。
-      final String body = ResponseDecoder.decode(
+      return ResponseDecoder.decode(
         response.bodyBytes,
         preferredCharset: source.charset,
         contentType: response.headers['content-type'],
       );
-
-      return parseVodPage(body, requestUrl: uri.toString());
     } on VodException {
       rethrow;
     } on TimeoutException {
       throw VodException('请求超时', url: uri.toString());
     } on Object catch (e) {
       throw VodException('请求失败：$e', url: uri.toString(), cause: e);
+    }
+  }
+
+  Future<VodPage> _fetch(Map<String, String> params) async {
+    final String pageSize = params['pagesize'] ?? params['limit'] ?? '20';
+    final Map<String, String> finalParams = <String, String>{
+      ...params,
+      'pagesize': pageSize,
+      'limit': pageSize,
+      // 老站默认吐 XML；显式要 JSON 能省掉一次解析分支，不认 at 的站忽略即可。
+      'at': params['at'] ?? 'json',
+    };
+    final Uri uri = _uri(finalParams);
+    final String body = await _get(uri);
+    return parseVodPage(body, requestUrl: uri.toString());
+  }
+
+  /// 按 ID 取详情时的 `detail` → `videolist` 自动降级。
+  ///
+  /// 老采集接口只认 `ac=videolist`，`ac=detail` 会退化成精简列表：HTTP 200、
+  /// 条目也在，就是没有 `vod_play_url`。所以除了请求抛错，**拿到条目却没有
+  /// 播放地址**也要重试一次。列表查询不走这里 —— 列表本来就不需要播放地址，
+  /// 否则每次翻页都会白打一次请求。
+  Future<VodPage> _fetchDetailByIds(Map<String, String> params) async {
+    final String primary = _detailAction[source.id] ?? 'detail';
+    final String alternate = primary == 'detail' ? 'videolist' : 'detail';
+
+    VodPage? firstPage;
+    VodException? firstError;
+    try {
+      firstPage = await _fetch(<String, String>{...params, 'ac': primary});
+    } on VodException catch (e) {
+      firstError = e;
+    }
+
+    bool playable(VodPage? page) =>
+        page != null && page.items.any((VodItem e) => e.hasPlayInfo);
+
+    final bool needFallback = firstPage == null ||
+        (firstPage.items.isNotEmpty && !playable(firstPage));
+    if (!needFallback || _detailFallbackTried.contains(source.id)) {
+      if (firstPage == null) throw firstError!;
+      return firstPage;
+    }
+
+    try {
+      final VodPage alt =
+          await _fetch(<String, String>{...params, 'ac': alternate});
+      if (playable(alt) && !playable(firstPage)) {
+        _detailAction[source.id] = alternate;
+        _detailFallbackTried.remove(source.id);
+        return alt;
+      }
+      _detailFallbackTried.add(source.id);
+      return firstPage ?? alt;
+    } on VodException {
+      _detailFallbackTried.add(source.id);
+      if (firstPage == null) throw firstError!;
+      return firstPage;
     }
   }
 
@@ -126,6 +200,8 @@ class MacCmsApi {
     String? area,
     String? lang,
     String? sortBy,
+    String? order,
+    String? letter,
     bool? isEnd,
     bool detail = false,
   }) {
@@ -157,6 +233,14 @@ class MacCmsApi {
     if (lg != null && lg.isNotEmpty) params['lang'] = lg;
     final String? by = sortBy?.trim();
     if (by != null && by.isNotEmpty) params['by'] = by;
+    // `order` / `letter` 都属于站点可选实现（typefilter），认不认都得在
+    // 调用方本地再兜一层，不能只指望服务端。
+    final String? od = order?.trim().toLowerCase();
+    if (od != null && (od == 'asc' || od == 'desc')) params['order'] = od;
+    final String? lt = letter?.trim().toUpperCase();
+    if (lt != null && RegExp(r'^[A-Z]$').hasMatch(lt)) {
+      params['letter'] = lt;
+    }
     return _fetch(params);
   }
 
@@ -168,8 +252,7 @@ class MacCmsApi {
 
   /// 按 ID 拉取详情（含播放地址）。
   Future<VodItem?> detail(int id) async {
-    final VodPage page = await _fetch(<String, String>{
-      'ac': 'detail',
+    final VodPage page = await _fetchDetailByIds(<String, String>{
       'ids': '$id',
       'pagesize': '1',
       'limit': '1',
@@ -181,8 +264,7 @@ class MacCmsApi {
   /// 按 ID 批量拉取详情。
   Future<List<VodItem>> detailsByIds(List<int> ids) async {
     if (ids.isEmpty) return const <VodItem>[];
-    final VodPage page = await _fetch(<String, String>{
-      'ac': 'detail',
+    final VodPage page = await _fetchDetailByIds(<String, String>{
       'ids': ids.join(','),
       'pagesize': '${ids.length}',
       'limit': '${ids.length}',
@@ -223,6 +305,153 @@ class MacCmsApi {
     }
   }
 
+  // ---------------------------------------------------------------- 联想词
+
+  /// 搜索联想词。
+  ///
+  /// macCMS 有两套联想接口（`/api.php/vod/suggest` 与老模板用的
+  /// `/index.php/ajax/suggest`），不同版本返回的字段还不一样；都不认的站点
+  /// 就退回所有 macCMS 都支持的 `ac=list&wd=` 拿前几部片名当建议。
+  /// 任何一步失败都静默降级，绝不因为「联想不出来」而打断搜索。
+  Future<List<String>> suggest(String keyword, {int limit = 10}) async {
+    final String q = keyword.trim();
+    if (q.isEmpty) return const <String>[];
+
+    if (!_restSuggestUnsupported.contains(source.id)) {
+      for (final Uri uri in _suggestEndpoints(q, limit)) {
+        final List<String> words = await _trySuggestRest(uri, q, limit);
+        if (words.isNotEmpty) return words;
+      }
+      // 两个 REST 端点都没给出东西，这个会话里不再逐个试，直接走兜底。
+      _restSuggestUnsupported.add(source.id);
+    }
+
+    try {
+      final VodPage page =
+          await query(pageSize: limit, keyword: q, detail: false);
+      return _uniqueNames(page.items.map((VodItem e) => e.name), q, limit);
+    } on VodException catch (e) {
+      AppLog.d('MacCms', 'suggest fallback failed: $e');
+      return const <String>[];
+    }
+  }
+
+  Future<List<String>> _trySuggestRest(
+    Uri uri,
+    String q,
+    int limit,
+  ) async {
+    try {
+      return parseSuggest(await _get(uri), exclude: q, limit: limit);
+    } on Object catch (e) {
+      AppLog.d('MacCms', 'suggest REST unavailable: $e');
+      return const <String>[];
+    }
+  }
+
+  /// 从 Provide 接口地址推导两个 REST 联想端点，保留 URL 里自带的 token。
+  List<Uri> _suggestEndpoints(String q, int limit) {
+    final Uri base = Uri.parse(VodSource.normalizeApi(source.api));
+    final String path = base.path.replaceAll(RegExp(r'/+$'), '');
+    final int at = path.indexOf('/provide/');
+    // `/api.php/provide/vod/` → `/api.php`；没有 provide 段就退回站点根。
+    final String apiPhp = at >= 0 ? path.substring(0, at) : '/api.php';
+    final String indexPhp =
+        apiPhp.replaceFirst(RegExp(r'api\.php$'), 'index.php');
+
+    Uri build(String p, Map<String, String> query) => base.replace(
+          path: p,
+          queryParameters: <String, String>{...base.queryParameters, ...query},
+        );
+
+    return <Uri>[
+      build('$apiPhp/vod/suggest', <String, String>{
+        'wd': q,
+        'limit': '$limit',
+      }),
+      build('$indexPhp/ajax/suggest', <String, String>{
+        'mid': '1',
+        'wd': q,
+        'limit': '$limit',
+        'timestamp': '${DateTime.now().millisecondsSinceEpoch}',
+      }),
+    ];
+  }
+
+  /// 解析联想响应：顶层数组或 `{info|list|data|...}` 都吃，数组元素可以是
+  /// 字符串，也可以是带 `name` / `vod_name` / `word` 的对象。
+  static List<String> parseSuggest(
+    String body, {
+    String exclude = '',
+    int limit = 10,
+  }) {
+    Object? data;
+    try {
+      data = jsonDecode(body.replaceAll('\uFEFF', '').trim());
+    } on Object {
+      return const <String>[];
+    }
+
+    List<Object?> candidates = const <Object?>[];
+    if (data is List) {
+      candidates = List<Object?>.from(data);
+    } else if (data is Map) {
+      for (final String key in <String>[
+        'info',
+        'list',
+        'data',
+        'suggest',
+        'result',
+      ]) {
+        final Object? value = data[key];
+        if (value is List) {
+          candidates = List<Object?>.from(value);
+          break;
+        }
+        // 有些版本把词表塞在 info.list / data.list 里。
+        if (value is Map && value['list'] is List) {
+          candidates = List<Object?>.from(value['list'] as List);
+          break;
+        }
+      }
+    }
+    return _uniqueNames(candidates.map(_suggestWord), exclude, limit);
+  }
+
+  static String _suggestWord(Object? entry) {
+    if (entry is String) return entry;
+    if (entry is Map) {
+      for (final String key in <String>[
+        'name',
+        'vod_name',
+        'word',
+        'keyword',
+        'title',
+      ]) {
+        final String value = strOf(entry[key]);
+        if (value.isNotEmpty) return value;
+      }
+    }
+    return '';
+  }
+
+  static List<String> _uniqueNames(
+    Iterable<String> raw,
+    String exclude,
+    int limit,
+  ) {
+    final Set<String> seen = <String>{exclude.trim().toLowerCase()};
+    final List<String> result = <String>[];
+    for (final String value in raw) {
+      final String word = decodeEntities(stripHtml(value)).trim();
+      if (word.isEmpty) continue;
+      if (!seen.add(word.toLowerCase())) continue;
+      result.add(word);
+      if (result.length >= limit) break;
+    }
+    return result;
+  }
+
   /// 连通性测试：能否取回一个 JSON 结构。
   Future<bool> ping() async {
     try {
@@ -242,8 +471,13 @@ class MacCmsApi {
   ///  * v10 的字典 `{"code":1,"list":[...],"class":[...]}`；
   ///  * 更老版本直接返回数组 `[{...},{...}]`。
   static VodPage parseVodPage(String body, {String? requestUrl}) {
-    final String raw = body.trim();
+    final String raw = body.replaceAll('\uFEFF', '').trim();
     if (raw.isEmpty) throw const VodException('资源站返回了空响应');
+
+    // 老采集接口输出 XML，字段和 vod_* 完全是两套。
+    if (XmlVodParser.looksLikeXml(raw)) {
+      return XmlVodParser.parse(raw, requestUrl: requestUrl);
+    }
 
     Object? data;
     try {
@@ -257,14 +491,14 @@ class MacCmsApi {
           data = jsonDecode(raw.substring(start, end + 1));
         } on Object catch (e) {
           throw VodException(
-            '响应不是合法 JSON（可能是接口已失效或需要代理）',
+            '响应不是合法 JSON 或 macCMS XML（可能是接口已失效或需要代理）',
             url: requestUrl,
             cause: e,
           );
         }
       } else {
         throw VodException(
-          '响应不是合法 JSON（可能是接口已失效或需要代理）',
+          '响应不是合法 JSON 或 macCMS XML（可能是接口已失效或需要代理）',
           url: requestUrl,
         );
       }
@@ -292,6 +526,20 @@ class MacCmsApi {
 
     final List<VodItem> items =
         _asMapList(map['list']).map(VodItem.fromJson).toList();
+
+    // 顶层 code/msg 是源站的错误通道。以前完全忽略，`{"code":0,"msg":"接口已关闭"}`
+    // 会被当成空列表，界面只说「没有内容」，用户根本不知道源站出错了。
+    // 只在没有数据时才抛：少数站点用 code:0 表示「无结果」但仍带正常 list，
+    // 那种情况照常展示，不要误伤。
+    final Object? code = map['code'];
+    final int? codeNum = code == null ? null : int.tryParse('$code');
+    if (codeNum != null && codeNum <= 0 && items.isEmpty) {
+      final String reason = strOf(map['msg'] ?? map['message'] ?? map['error']);
+      throw VodException(
+        reason.isEmpty ? '资源站返回错误（code=$code）' : reason,
+        url: requestUrl,
+      );
+    }
 
     final List<VodCategory> categories = _asMapList(map['class'])
         .map(VodCategory.fromJson)

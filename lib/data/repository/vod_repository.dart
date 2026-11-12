@@ -33,6 +33,11 @@ class VodRepository {
   final Map<String, _CacheEntry<List<VodCategory>>> _categories =
       <String, _CacheEntry<List<VodCategory>>>{};
 
+  /// 联想词缓存：打字时会反复请求同一个前缀，缓存两分钟足够挡掉绝大部分。
+  final Map<String, _CacheEntry<List<String>>> _suggestions =
+      <String, _CacheEntry<List<String>>>{};
+  static const Duration _suggestTtl = Duration(minutes: 2);
+
   // ---------------------------------------------------------------- 分类
 
   /// 取某站点的分类表。
@@ -77,6 +82,8 @@ class VodRepository {
     String? area,
     String? lang,
     String? sortBy,
+    String? order,
+    String? letter,
     bool? isEnd,
     bool detail = true,
     bool force = false,
@@ -91,6 +98,8 @@ class VodRepository {
       'area': area,
       'lang': lang,
       'by': sortBy,
+      'od': order,
+      'lt': letter,
       'end': isEnd,
       'ac': detail ? 'd' : 'l',
     });
@@ -110,6 +119,8 @@ class VodRepository {
           area: area,
           lang: lang,
           sortBy: sortBy,
+          order: order,
+          letter: letter,
           isEnd: isEnd,
           detail: detail,
         );
@@ -201,17 +212,42 @@ class VodRepository {
     return _api(source).detailsByIds(ids);
   }
 
+  /// 搜索联想词。REST 接口不可用时由 API 层静默退回 Provide 片名，
+  /// 这里只负责按「源 + 关键词」做短 TTL 缓存。
+  Future<List<String>> suggest({
+    required VodSource source,
+    required String keyword,
+  }) async {
+    final String q = keyword.trim();
+    if (q.isEmpty) return const <String>[];
+    final String key = '${source.id}|$q';
+    final _CacheEntry<List<String>>? hit = _suggestions[key];
+    if (hit != null && DateTime.now().difference(hit.at) < _suggestTtl) {
+      return hit.value;
+    }
+    final List<String> words =
+        await _api(source).suggest(q);
+    _suggestions[key] = _CacheEntry<List<String>>(words, DateTime.now());
+    while (_suggestions.length > 120) {
+      _suggestions.remove(_suggestions.keys.first);
+    }
+    return words;
+  }
+
   /// 重试当前失败的请求（清空该源的缓存）。
   void invalidateSource(String sourceId) {
     _pages.removeWhere(
         (String k, _CacheEntry<VodPage> v) => k.startsWith('$sourceId|'));
     _categories.removeWhere((String k, _CacheEntry<List<VodCategory>> v) =>
         k.startsWith('$sourceId|'));
+    _suggestions.removeWhere(
+        (String k, _CacheEntry<List<String>> v) => k.startsWith('$sourceId|'));
   }
 
   void clearAll() {
     _pages.clear();
     _categories.clear();
+    _suggestions.clear();
   }
 
   // ---------------------------------------------------------------- 内部

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/utils/debouncer.dart';
 import '../../core/utils/responsive.dart';
 import '../../data/models/vod_item.dart';
 import '../../data/models/vod_source.dart';
@@ -32,6 +33,10 @@ class _SearchPageState extends State<SearchPage>
   late final FocusNode _focusNode = widget.focusNode ?? FocusNode();
   late final bool _ownsFocusNode = widget.focusNode == null;
 
+  /// 联想词去抖：敲字段期间不发请求，停下 350ms 才查一次。
+  final Debouncer _suggestDebouncer =
+      Debouncer(const Duration(milliseconds: 350));
+
   @override
   bool get wantKeepAlive => true;
 
@@ -45,6 +50,7 @@ class _SearchPageState extends State<SearchPage>
 
   @override
   void dispose() {
+    _suggestDebouncer.dispose();
     _controller.dispose();
     if (_ownsFocusNode) _focusNode.dispose();
     super.dispose();
@@ -57,6 +63,7 @@ class _SearchPageState extends State<SearchPage>
   Future<void> _search(String text) async {
     final String q = text.trim();
     final SearchStore store = context.read<SearchStore>();
+    _suggestDebouncer.cancel();
     if (q.isEmpty) {
       store.clearResult();
       return;
@@ -103,8 +110,18 @@ class _SearchPageState extends State<SearchPage>
                   // 桌面端进搜索页直接能打字；手机端不自动弹软键盘。
                   autofocus: PlatformInfo.isDesktop,
                   textInputAction: TextInputAction.search,
-                  // 打字只刷新清空按钮的显隐，不发请求。
-                  onChanged: (_) => setState(() {}),
+                  // 打字只刷新清空按钮的显隐；联想词经过去抖，不会逐字打接口。
+                  onChanged: (String value) {
+                    setState(() {});
+                    final SearchStore store = context.read<SearchStore>();
+                    final SourceStore sources = context.read<SourceStore>();
+                    final List<VodSource> enabled = sources.enabledSources;
+                    final VodSource? target = sources.active ??
+                        (enabled.isEmpty ? null : enabled.first);
+                    _suggestDebouncer.run(() {
+                      if (mounted) store.suggest(value, target);
+                    });
+                  },
                   onSubmitted: _search,
                   decoration: InputDecoration(
                     hintText: '搜索影片、剧集…',
@@ -178,6 +195,10 @@ class _SearchPageState extends State<SearchPage>
               ],
             ),
           ),
+        if (store.suggestions.isNotEmpty &&
+            _controller.text.trim().isNotEmpty &&
+            _controller.text.trim() != store.query)
+          _SuggestionStrip(words: store.suggestions, onPick: _pickHistory),
         const SizedBox(height: 4),
         Expanded(child: _buildBody(context, store, sourceStore)),
       ],
@@ -244,6 +265,29 @@ class _SearchPageState extends State<SearchPage>
       ),
     );
   }
+}
+
+/// 搜索框下方的联想词横条。点一个词等价于「填入 + 回车」。
+class _SuggestionStrip extends StatelessWidget {
+  const _SuggestionStrip({required this.words, required this.onPick});
+
+  final List<String> words;
+  final ValueChanged<String> onPick;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        height: 40,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: words.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 6),
+          itemBuilder: (BuildContext context, int index) => ActionChip(
+            label: Text(words[index], overflow: TextOverflow.ellipsis),
+            onPressed: () => onPick(words[index]),
+          ),
+        ),
+      );
 }
 
 /// 空查询时展示搜索历史。

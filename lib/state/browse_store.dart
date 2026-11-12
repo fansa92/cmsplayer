@@ -26,11 +26,17 @@ class BrowseStore extends ChangeNotifier {
   String _area = '';
   String _lang = '';
   String _sortBy = '';
+  String _order = '';
+  String _letter = '';
   int _pageSize = K.defaultPageSize;
   int _pageNo = 1;
   int _pageCount = 1;
   int _total = 0;
   List<VodItem> _items = <VodItem>[];
+
+  /// 未经本地筛选的原始条目，用来算 A–Z 侧栏有哪些字母可点。
+  /// 用筛选后的 [items] 算的话，选中「B」之后侧栏就只剩 B，没法再切走了。
+  List<VodItem> _rawItems = <VodItem>[];
   bool _loading = false;
   bool _loadingMore = false;
   String? _error;
@@ -53,6 +59,8 @@ class BrowseStore extends ChangeNotifier {
   String get area => _area;
   String get lang => _lang;
   String get sortBy => _sortBy;
+  String get order => _order;
+  String get letter => _letter;
   int get pageSize => _pageSize;
   int get pageNo => _pageNo;
   int get pageCount => _pageCount;
@@ -68,9 +76,36 @@ class BrowseStore extends ChangeNotifier {
       _year.isNotEmpty ||
       _area.isNotEmpty ||
       _lang.isNotEmpty ||
-      _sortBy.isNotEmpty;
+      _sortBy.isNotEmpty ||
+      _order.isNotEmpty ||
+      _letter.isNotEmpty;
 
   bool get canLoadMore => _pageNo < _pageCount;
+
+  /// 当前这批结果里出现过、且能拿来做索引的首字母（已排序）。
+  ///
+  /// 中文片名没有拼音库，只能认源站给的 `vod_letter` 和以英文字母开头的
+  /// 片名；一个字母都没有时界面会把侧栏整个隐藏，不留一排死按钮。
+  List<String> get availableLetters {
+    final Set<String> letters = <String>{};
+    for (final VodItem item in _rawItems) {
+      final String l = letterOf(item);
+      if (l.isNotEmpty) letters.add(l);
+    }
+    final List<String> sorted = letters.toList()..sort();
+    return List<String>.unmodifiable(sorted);
+  }
+
+  /// 取一个条目可索引的首字母，取不到返回空串。
+  static String letterOf(VodItem item) {
+    final String given = item.letter.trim().toUpperCase();
+    if (RegExp(r'^[A-Z]$').hasMatch(given)) return given;
+    final String name = item.name.trim().toUpperCase();
+    if (name.isNotEmpty && RegExp(r'^[A-Z]').hasMatch(name)) {
+      return name.substring(0, 1);
+    }
+    return '';
+  }
 
   String get categoryTitle {
     if (_typeIds.isEmpty) return '全部';
@@ -106,7 +141,10 @@ class BrowseStore extends ChangeNotifier {
     _area = '';
     _lang = '';
     _sortBy = '';
+    _order = '';
+    _letter = '';
     _items = <VodItem>[];
+    _rawItems = <VodItem>[];
     _pageNo = 1;
     _pageCount = 1;
     _total = 0;
@@ -139,6 +177,8 @@ class BrowseStore extends ChangeNotifier {
         area: _area,
         lang: _lang,
         sortBy: _sortBy,
+        order: _order,
+        letter: _letter,
         isEnd: _onlyFinished ? true : null,
         detail: true,
         force: force,
@@ -159,7 +199,8 @@ class BrowseStore extends ChangeNotifier {
         }
       }
 
-      _items = _applyEndFilter(page.items);
+      _rawItems = page.items;
+      _items = _applyFilters(page.items);
       _pageNo = page.page;
       _pageCount = page.pageCount;
       _total = page.total;
@@ -192,10 +233,13 @@ class BrowseStore extends ChangeNotifier {
         area: _area,
         lang: _lang,
         sortBy: _sortBy,
+        order: _order,
+        letter: _letter,
         isEnd: _onlyFinished ? true : null,
         detail: true,
       );
-      _items = <VodItem>[..._items, ..._applyEndFilter(page.items)];
+      _rawItems = <VodItem>[..._rawItems, ...page.items];
+      _items = _applyFilters(_rawItems);
       _pageNo = page.page;
       _pageCount = page.pageCount;
       _total = page.total;
@@ -210,19 +254,26 @@ class BrowseStore extends ChangeNotifier {
 
   // ---------------------------------------------------------------- 筛选
 
-  /// 已完结筛选的本地兜底。
+  /// 服务端侧筛选的本地兜底（已完结 / 首字母）。
   ///
-  /// 服务端认 `isend` 就已经筛过一遍，这里再筛一次不会改变结果；不认的
-  /// 站点会把参数当空气，靠这一步保证列表里不会混进连载中的片子。
-  List<VodItem> _applyEndFilter(List<VodItem> items) {
-    if (!_onlyFinished) return items;
-    return items
-        .where((VodItem e) => e.finishedLikely)
-        .toList(growable: false);
+  /// 认 `isend` / `letter` 的站服务端已经筛过，再筛一次不改变结果；不认的
+  /// 站会把参数当空气，靠这一步保证列表里不混进连载中或其它字母的片子。
+  /// `letter` 只在响应里确实出现该字母时才动本地过滤：很多站既不认
+  /// `letter` 也不返回 `vod_letter`，无脑按首字母筛会把整页清空。
+  List<VodItem> _applyFilters(List<VodItem> items) {
+    if (!_onlyFinished && _letter.isEmpty) return items;
+    final bool useLetter = _letter.isNotEmpty &&
+        items.any((VodItem e) => letterOf(e) == _letter);
+    return items.where((VodItem e) {
+      if (_onlyFinished && !e.finishedLikely) return false;
+      if (useLetter && letterOf(e) != _letter) return false;
+      return true;
+    }).toList(growable: false);
   }
 
   void _resetPages() {
     _items = <VodItem>[];
+    _rawItems = <VodItem>[];
     _pageNo = 1;
     _pageCount = 1;
   }
@@ -265,6 +316,8 @@ class BrowseStore extends ChangeNotifier {
     String? area,
     String? lang,
     String? sortBy,
+    String? order,
+    String? letter,
     bool? onlyFinished,
   }) async {
     bool changed = false;
@@ -283,6 +336,21 @@ class BrowseStore extends ChangeNotifier {
     if (sortBy != null && _sortBy != sortBy) {
       _sortBy = sortBy;
       changed = true;
+    }
+    if (order != null) {
+      final String next = (order == 'asc' || order == 'desc') ? order : '';
+      if (_order != next) {
+        _order = next;
+        changed = true;
+      }
+    }
+    if (letter != null) {
+      final String upper = letter.trim().toUpperCase();
+      final String next = RegExp(r'^[A-Z]$').hasMatch(upper) ? upper : '';
+      if (_letter != next) {
+        _letter = next;
+        changed = true;
+      }
     }
     if (onlyFinished != null && _onlyFinished != onlyFinished) {
       _onlyFinished = onlyFinished;
@@ -303,6 +371,8 @@ class BrowseStore extends ChangeNotifier {
     _area = '';
     _lang = '';
     _sortBy = '';
+    _order = '';
+    _letter = '';
     _resetPages();
     _emit();
     await refresh();
