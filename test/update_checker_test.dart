@@ -62,12 +62,13 @@ void main() {
         };
 
     test('正常发行版解析出结构化信息', () {
+      // 用远期版本号做夹具，避免每次升版本都要跟着改这里。
       final UpdateInfo? info =
-          UpdateChecker.parseRelease(release(tag: 'v1.0.3'));
+          UpdateChecker.parseRelease(release(tag: 'v9.9.9'));
       expect(info, isNotNull);
-      expect(info!.version, '1.0.3');
-      expect(info.tag, 'v1.0.3');
-      expect(info.url, contains('/releases/tag/v1.0.3'));
+      expect(info!.version, '9.9.9');
+      expect(info.tag, 'v9.9.9');
+      expect(info.url, contains('/releases/tag/v9.9.9'));
       expect(info.notes, '修了一些问题');
       expect(info.publishedAt?.toUtc().hour, 8);
       expect(info.isNewer, isTrue);
