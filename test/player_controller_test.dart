@@ -36,6 +36,9 @@ void main() {
   int notifications = 0;
   int historyWrites = 0;
 
+  /// 上一轮的 store，`mount` 时关掉，避免它迟到的 notify 污染本轮计数。
+  HistoryStore? previousHistory;
+
   VodSource source({String parseApi = '', String host = 'a.com'}) =>
       VodSource.fromRaw(<String, Object>{
         'name': '测试站',
@@ -135,7 +138,12 @@ void main() {
     await settings.setAutoSkipOutro(autoSkipOutro);
 
     app = AppState(settings);
+    // 上一个用例的 store 可能还剩一次迟到的 notify：tearDown 的 dispose 会
+    // 强制补写一条记录，而 `HistoryStore.upsert` 是「先落盘、再通知」，慢盘
+    // （CI 上尤其明显）上通知会落到下一轮，把本轮计数顶成 2。先关掉旧的。
+    previousHistory?.dispose();
     history = HistoryStore();
+    previousHistory = history;
     sources = SourceStore(settings);
     task = PlayTask(
       source: src ?? source(),
@@ -150,7 +158,11 @@ void main() {
       await sources.add(s);
     }
     historyWrites = 0;
-    history.addListener(() => historyWrites++);
+    final HistoryStore thisRound = history;
+    history.addListener(() {
+      // 兜底：只认本轮的 store，迟到的旧 store 通知不计入。
+      if (identical(thisRound, history)) historyWrites++;
+    });
 
     controller = PlayerController(
       task: task,
@@ -794,7 +806,10 @@ void main() {
       // 切到下一集时 _openUrl 会把 completed 重置，但「已看完」这一条
       // 记录必须在切集之前就落盘。
       expect(controller.completed, isFalse);
-      await rig.waitUntil(() => history.byKey(task.recordKey) != null);
+      // 等「已看完」这条真的落盘，而不是只等记录出现 —— 记录可能先被
+      // 别的写入（未完成状态）建出来，那样会读到还没标 finished 的旧值。
+      await rig.waitUntil(
+          () => history.byKey(task.recordKey)?.finished == true);
       expect(history.byKey(task.recordKey)!.finished, isTrue);
     });
 
