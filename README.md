@@ -352,12 +352,12 @@ quality（dart analyze + flutter test）
 ### 发布
 
 ```bash
-git tag v1.0.5
-git push origin v1.0.5
+git tag v1.0.6
+git push origin v1.0.6
 ```
 
 版本号取自标签（去掉 `v`）；手动触发时用 `pubspec.yaml` 的版本 + 短 commit，
-产物名即 `CMSPlayer-1.0.5-dev.abc1234-…`。
+产物名即 `CMSPlayer-1.0.6-dev.abc1234-…`。
 
 ### 可选 Secrets
 
