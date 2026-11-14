@@ -3,7 +3,7 @@ description: >-
   CMSPlayer 风格的跨平台 VOD 播放器。支持 macCMS / 苹果CMS 资源站，
   可运行于 Windows / macOS / Linux / Android / iOS。
 publish_to: "none"
-version: 1.0.4+5
+version: 1.0.5+6
 
 environment:
   sdk: ">=3.5.0 <4.0.0"

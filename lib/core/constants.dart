@@ -4,7 +4,7 @@ class K {
 
   static const String appName = 'CMSPlayer';
   static const String appNameCn = 'CMS 播放器';
-  static const String appVersion = '1.0.4';
+  static const String appVersion = '1.0.5';
 
   // ---------------- 更新检查 ----------------
   /// 仓库地址。应用内更新检查直接打 GitHub 的公开 API，不需要 token。
