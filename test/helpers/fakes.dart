@@ -11,7 +11,9 @@ import 'package:cms_player/data/api/maccms_api.dart';
 import 'package:cms_player/data/models/vod_source.dart';
 import 'package:cms_player/data/repository/vod_repository.dart';
 import 'package:cms_player/data/sync/sync_tombstones.dart';
+import 'package:cms_player/state/source_health_store.dart';
 import 'package:cms_player/state/source_store.dart';
+import 'package:cms_player/state/watch_stats_store.dart';
 
 /// 被假客户端记录下来的一次请求。
 class RecordedRequest {
@@ -153,6 +155,8 @@ void useIsolatedStores() {
     VodRepository.instance.clearAll();
     MacCmsApi.resetCompatForTest();
     ShowMarksStore.instance.resetForTest();
+    WatchStatsStore.instance.resetForTest();
+    SourceHealthStore.instance.resetForTest();
     await SyncTombstones.instance.clearAll();
   });
 
@@ -160,7 +164,10 @@ void useIsolatedStores() {
     VodRepository.resetApiFactory();
     VodRepository.instance.clearAll();
     SourceStore.resetPinger();
+    SourceHealthStore.resetProber();
     ShowMarksStore.instance.resetForTest();
+    WatchStatsStore.instance.resetForTest();
+    SourceHealthStore.instance.resetForTest();
     await SyncTombstones.instance.clearAll();
     JsonStore.overrideDirectory = null;
     // Windows 上刚写过的文件句柄不会立刻释放，直接递归删偶发

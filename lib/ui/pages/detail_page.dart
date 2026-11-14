@@ -559,6 +559,17 @@ class _DetailPageState extends State<DetailPage> {
             ),
           ],
         ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
+          icon: const Icon(Icons.compare_arrows, size: 18),
+          label: const Text('全源对比'),
+          onPressed: () => AppRoutes.openCompare(
+            context,
+            title: _item.name,
+            year: _item.year,
+          ),
+        ),
       ],
     );
   }

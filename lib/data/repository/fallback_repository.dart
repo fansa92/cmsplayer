@@ -1,4 +1,5 @@
 import '../../core/logger.dart';
+import '../../core/utils/title_match.dart';
 import '../models/paged_result.dart';
 import '../models/play_line.dart';
 import '../models/play_task.dart';
@@ -137,13 +138,9 @@ class FallbackResolver {
     final List<SourceFallback> result = <SourceFallback>[];
     for (int i = 0; i < pages.length; i++) {
       for (final VodItem item in pages[i].items) {
-        if (!_sameTitle(item.name, title)) continue;
+        if (!sameTitle(item.name, title)) continue;
         // 年代对不上基本可以断定是另一部片子（同名翻拍很少见）。
-        final String fromYear = task.item.year.trim();
-        final String toYear = item.year.trim();
-        if (fromYear.isNotEmpty && toYear.isNotEmpty && fromYear != toYear) {
-          continue;
-        }
+        if (!yearCompatible(task.item.year, item.year)) continue;
 
         final VodItem detail;
         try {
@@ -196,56 +193,13 @@ class FallbackResolver {
     for (int i = 0; i < line.episodes.length; i++) {
       if (line.episodes[i].name.trim() == name) return i;
     }
-    final int? number = _episodeNumber(name);
+    final int? number = episodeNumber(name);
     if (number != null) {
       for (int i = 0; i < line.episodes.length; i++) {
-        if (_episodeNumber(line.episodes[i].name) == number) return i;
+        if (episodeNumber(line.episodes[i].name) == number) return i;
       }
     }
     return -1;
-  }
-
-  /// 从集名里提取序号：`第01集` / `01` / `第 1 话` 都能取出 1。
-  static int? _episodeNumber(String name) {
-    final RegExpMatch? match = RegExp(r'(\d+)').firstMatch(name);
-    if (match == null) return null;
-    return int.tryParse(match.group(1)!);
-  }
-
-  /// 两个片名是否算同一部片子。
-  ///
-  /// 归一化（去空白、去「高清」「国语」这类后缀）后相等，
-  /// 或者一方是另一方的前缀且只多出少量修饰字，就算同一部。
-  static bool _sameTitle(String a, String b) {
-    final String x = _normalizeTitle(a);
-    final String y = _normalizeTitle(b);
-    if (x.isEmpty || y.isEmpty) return false;
-    if (x == y) return true;
-    if (x.startsWith(y) && x.length - y.length <= 4) return true;
-    if (y.startsWith(x) && y.length - x.length <= 4) return true;
-    return false;
-  }
-
-  /// 去掉片名里的空白与常见修饰后缀，便于跨站比对。
-  static String _normalizeTitle(String raw) {
-    String text = raw.trim().replaceAll(RegExp(r'\s+'), '');
-    for (final String suffix in const <String>[
-      '国语',
-      '粤语',
-      '台配',
-      '高清',
-      'HD',
-      'hd',
-      '完整版',
-      '未删减',
-      '在线观看',
-      '免费观看',
-    ]) {
-      if (text.endsWith(suffix) && text.length > suffix.length) {
-        text = text.substring(0, text.length - suffix.length);
-      }
-    }
-    return text;
   }
 }
 

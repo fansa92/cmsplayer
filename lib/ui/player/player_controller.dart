@@ -18,6 +18,7 @@ import '../../data/repository/fallback_repository.dart';
 import '../../state/app_state.dart';
 import '../../state/history_store.dart';
 import '../../state/source_store.dart';
+import '../../state/watch_stats_store.dart';
 import 'player_controls_binding.dart';
 import 'player_environment.dart';
 
@@ -141,6 +142,13 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   bool _disposed = false;
   DateTime _lastHistoryWrite = DateTime.fromMillisecondsSinceEpoch(0);
   bool _resumeApplied = false;
+
+  /// 上一条进度事件的毫秒数。观看统计要的是「两次事件之间真的播了多久」，
+  /// 所以必须留着上一跳做差。
+  int _lastTickMs = 0;
+
+  /// 还没有写进统计的观看毫秒数。攒够一段才落盘。
+  int _pendingWatchMs = 0;
 
   // ---------------------------------------------------------------- 音轨
 
@@ -462,6 +470,7 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
       if (!_maybeAutoResume()) _maybeSkipIntro();
       _maybeSkipOutro();
       _maybeWriteHistory();
+      _trackWatchTime(p);
       _emit();
     }));
     _subs.add(_player.stream.duration.listen((Duration d) {
@@ -1488,6 +1497,42 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     );
   }
 
+  // ---------------------------------------------------------------- 观看统计
+
+  /// 累计真实播放时长。
+  ///
+  /// 只看进度流两次事件之间的**正向小增量**：
+  ///  * 拖进度条 / 自动跳片头片尾会产生大跳变（超过 [K.watchMaxTickJumpMs]），
+  ///    跳过的那段没看过，不算；
+  ///  * 往回拖（增量为负）只是重置基准，也不扣时间；
+  ///  * 暂停时进度不动，本来就不会有增量。
+  ///
+  /// 攒够 [K.watchFlushMs] 才交给 [WatchStatsStore]，避免每秒写盘。
+  void _trackWatchTime(Duration position) {
+    final int ms = position.inMilliseconds;
+    final int last = _lastTickMs;
+    _lastTickMs = ms;
+    if (!_playing || last <= 0 || ms <= last) return;
+    final int delta = ms - last;
+    if (delta > K.watchMaxTickJumpMs) return;
+    _pendingWatchMs += delta;
+    if (_pendingWatchMs >= K.watchFlushMs) _commitWatchTime();
+  }
+
+  /// 把攒下的观看时长写进统计；[force] 用于退出时兜底。
+  void _commitWatchTime({bool force = false}) {
+    final int ms = _pendingWatchMs;
+    // 退出时不足 5 秒的零头不值得写一行；正常播放中由阈值控制。
+    if (ms <= 0 || (force && ms < 5000)) return;
+    _pendingWatchMs = 0;
+    unawaited(WatchStatsStore.instance.add(
+      title: _task.item.name,
+      sourceId: _task.source.id,
+      sourceName: _task.source.name,
+      watched: Duration(milliseconds: ms),
+    ));
+  }
+
   // ---------------------------------------------------------------- 释放
 
   Future<void> restoreBrightness() async {
@@ -1516,6 +1561,7 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     }
     _subs.clear();
     _writeHistory(force: true);
+    _commitWatchTime(force: true);
     unawaited(_player.dispose());
     unawaited(restoreBrightness());
     super.dispose();

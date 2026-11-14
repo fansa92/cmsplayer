@@ -1,10 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/formatter.dart';
+import '../../data/models/source_health.dart';
 import '../../data/models/vod_source.dart';
+import '../../state/source_health_store.dart';
 import '../../state/source_store.dart';
 import '../actions.dart';
 import '../widgets/empty_state.dart';
@@ -24,8 +29,24 @@ class _SourcePageState extends State<SourcePage> {
   final Map<String, bool> _testResults = <String, bool>{};
 
   @override
+  void initState() {
+    super.initState();
+    // 上次的测速结果从磁盘补回来，进页面就能看到数字，不必再测一遍。
+    unawaited(SourceHealthStore.instance.ensureLoaded());
+  }
+
+  @override
   Widget build(BuildContext context) {
     final SourceStore store = context.watch<SourceStore>();
+
+    return ListenableBuilder(
+      listenable: SourceHealthStore.instance,
+      builder: (BuildContext context, _) => _buildScaffold(store),
+    );
+  }
+
+  Widget _buildScaffold(SourceStore store) {
+    final SourceHealthStore health = SourceHealthStore.instance;
 
     return Scaffold(
       appBar: AppBar(
@@ -44,11 +65,28 @@ class _SourcePageState extends State<SourcePage> {
           PopupMenuButton<String>(
             tooltip: '更多',
             onSelected: (String v) => _onMenu(context, v, store),
-            itemBuilder: (BuildContext ctx) => const <PopupMenuEntry<String>>[
-              PopupMenuItem<String>(value: 'test_all', child: Text('测试全部连通性')),
-              PopupMenuItem<String>(value: 'export', child: Text('导出为 JSON')),
-              PopupMenuItem<String>(value: 'builtin', child: Text('恢复内置示例源')),
-              PopupMenuItem<String>(value: 'clear', child: Text('清空所有源')),
+            itemBuilder: (BuildContext ctx) => <PopupMenuEntry<String>>[
+              PopupMenuItem<String>(
+                value: 'speed_test',
+                enabled: !health.probing,
+                child: const Text('测速全部源'),
+              ),
+              PopupMenuItem<String>(
+                value: 'sort_speed',
+                enabled: !health.probing,
+                child: const Text('按测速结果排序'),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem<String>(
+                value: 'test_all',
+                child: Text('测试全部连通性'),
+              ),
+              const PopupMenuItem<String>(value: 'export', child: Text('导出为 JSON')),
+              const PopupMenuItem<String>(
+                value: 'builtin',
+                child: Text('恢复内置示例源'),
+              ),
+              const PopupMenuItem<String>(value: 'clear', child: Text('清空所有源')),
             ],
           ),
           const SizedBox(width: 4),
@@ -63,7 +101,7 @@ class _SourcePageState extends State<SourcePage> {
                   subtitle: '本应用本身不提供任何影片，只负责对接 macCMS（苹果CMS）资源站接口。'
                       '可以导入官方源列表，或手动填写接口地址。',
                 )
-              : _buildList(store),
+              : _buildList(store, health),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _editSource(context, null),
         icon: const Icon(Icons.add),
@@ -72,21 +110,53 @@ class _SourcePageState extends State<SourcePage> {
     );
   }
 
-  Widget _buildList(SourceStore store) {
+  Widget _buildList(SourceStore store, SourceHealthStore health) {
+    final ThemeData theme = Theme.of(context);
+    final DateTime? checkedAt = health.lastCheckedAt;
+
     return Column(
       children: <Widget>[
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
           child: Row(
             children: <Widget>[
-              Text(
-                '共 ${store.sources.length} 个源 · 启用 ${store.enabledSources.length} 个',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      '共 ${store.sources.length} 个源 · 启用 ${store.enabledSources.length} 个',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
+                    if (checkedAt != null)
+                      Text(
+                        '上次测速 ${formatRelativeTime(checkedAt)}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
+                ),
               ),
-              const Spacer(),
-              if (store.busy)
+              if (health.probing) ...<Widget>[
+                SizedBox(
+                  width: 13,
+                  height: 13,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '测速中…',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ] else if (store.busy)
                 const SizedBox(
                   width: 14,
                   height: 14,
@@ -111,11 +181,13 @@ class _SourcePageState extends State<SourcePage> {
                 isActive: source.id == store.activeId,
                 isTesting: store.testingId == source.id,
                 testResult: _testResults[source.id],
+                health: health.of(source.id),
                 onToggle: () => store.toggleEnabled(source.id),
                 onSelect: () => store.setActive(source),
                 onEdit: () => _editSource(context, source),
                 onDelete: () => _confirmDelete(context, store, source),
                 onTest: () => _testOne(context, store, source),
+                onSpeedTest: () => _speedOne(context, source),
               );
             },
           ),
@@ -140,12 +212,70 @@ class _SourcePageState extends State<SourcePage> {
     }
   }
 
+  Future<void> _speedOne(BuildContext context, VodSource source) async {
+    final SourceHealth health = await SourceHealthStore.instance.probeOne(source);
+    if (!mounted) return;
+    if (!context.mounted) return;
+    AppActions.snack(
+      context,
+      health.ok
+          ? '「${source.name}」${health.latencyMs} ms（${health.speedLabel}）'
+          : '「${source.name}」测速失败，接口可能不可用',
+    );
+  }
+
+  /// 测速全部源；[sort] 为 true 时顺手按结果重排。
+  Future<void> _probeAll(SourceStore store, {required bool sort}) async {
+    final List<VodSource> targets =
+        store.enabledSources.where((VodSource s) => s.isUsable).toList();
+    if (targets.isEmpty) {
+      AppActions.snack(context, '没有可测速的源');
+      return;
+    }
+
+    final Map<String, SourceHealth> results =
+        await SourceHealthStore.instance.probeAll(targets);
+    if (!mounted) return;
+
+    if (sort) {
+      await store.applyOrder(SourceHealthStore.instance.orderBySpeed(targets));
+      if (!mounted) return;
+    }
+
+    final List<SourceHealth> ok = results.values
+        .where((SourceHealth h) => h.ok)
+        .toList()
+      ..sort((SourceHealth a, SourceHealth b) =>
+          a.latencyMs.compareTo(b.latencyMs));
+    if (ok.isEmpty) {
+      AppActions.snack(context, '${targets.length} 个源都没测通，请检查网络或接口');
+      return;
+    }
+    final SourceHealth fastest = ok.first;
+    final String name = targets
+        .firstWhere((VodSource s) => s.id == fastest.sourceId,
+            orElse: () => targets.first)
+        .name;
+    AppActions.snack(
+      context,
+      sort
+          ? '已按测速排序 · 最快「$name」${fastest.latencyMs} ms'
+          : '${ok.length}/${targets.length} 个源可用 · 最快「$name」${fastest.latencyMs} ms',
+    );
+  }
+
   Future<void> _onMenu(
     BuildContext context,
     String action,
     SourceStore store,
   ) async {
     switch (action) {
+      case 'speed_test':
+        await _probeAll(store, sort: false);
+        break;
+      case 'sort_speed':
+        await _probeAll(store, sort: true);
+        break;
       case 'test_all':
         final Route<void> loading =
             AppActions.showBlockingLoading(context, message: '正在并发测试所有源…');
@@ -398,6 +528,8 @@ class _SourceTile extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onTest,
+    required this.onSpeedTest,
+    this.health,
   });
 
   final int index;
@@ -405,11 +537,15 @@ class _SourceTile extends StatelessWidget {
   final bool isActive;
   final bool isTesting;
   final bool? testResult;
+
+  /// 上次测速结果；从没测过时为 null。
+  final SourceHealth? health;
   final VoidCallback onToggle;
   final VoidCallback onSelect;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onTest;
+  final VoidCallback onSpeedTest;
 
   @override
   Widget build(BuildContext context) {
@@ -498,6 +634,14 @@ class _SourceTile extends StatelessWidget {
                             label: const Text('测试'),
                             onPressed: isTesting ? null : onTest,
                           ),
+                          if (health != null)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: _SpeedChip(
+                                health: health!,
+                                onTap: onSpeedTest,
+                              ),
+                            ),
                           if (!source.enabled)
                             Padding(
                               padding: const EdgeInsets.only(left: 8),
@@ -528,6 +672,9 @@ class _SourceTile extends StatelessWidget {
                       case 'test':
                         onTest();
                         break;
+                      case 'speed':
+                        onSpeedTest();
+                        break;
                       case 'delete':
                         onDelete();
                         break;
@@ -537,10 +684,54 @@ class _SourceTile extends StatelessWidget {
                       const <PopupMenuEntry<String>>[
                     PopupMenuItem<String>(value: 'edit', child: Text('编辑')),
                     PopupMenuItem<String>(value: 'test', child: Text('测试连通性')),
+                    PopupMenuItem<String>(value: 'speed', child: Text('测速')),
                     PopupMenuItem<String>(value: 'delete', child: Text('删除')),
                   ],
                 ),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 延迟小标签：`120 ms` + 档位颜色。
+class _SpeedChip extends StatelessWidget {
+  const _SpeedChip({required this.health, required this.onTap});
+
+  final SourceHealth health;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final Color color = switch (health.speed) {
+      SourceSpeed.fast => AppTheme.successOn(theme.brightness),
+      SourceSpeed.normal => theme.colorScheme.primary,
+      SourceSpeed.slow => theme.brightness == Brightness.dark
+          ? Colors.amber.shade300
+          : Colors.amber.shade800,
+      SourceSpeed.dead => theme.colorScheme.error,
+    };
+
+    return Tooltip(
+      message: '${health.speedLabel} · 点一下重新测速',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            health.latencyLabel,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),

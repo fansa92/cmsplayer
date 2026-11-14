@@ -187,11 +187,26 @@ class _SearchPageState extends State<SearchPage>
                 Expanded(
                   child: Text(
                     store.multiSource ? '结果会合并去重' : '仅搜索当前源',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
+                if (store.query.isNotEmpty)
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                    icon: const Icon(Icons.compare_arrows, size: 18),
+                    label: const Text('全源对比'),
+                    onPressed: () => AppRoutes.openCompare(
+                      context,
+                      title: store.query,
+                    ),
+                  ),
               ],
             ),
           ),

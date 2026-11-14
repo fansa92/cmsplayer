@@ -210,6 +210,41 @@ class SourceStore extends ChangeNotifier {
     _emit();
   }
 
+  /// 按给定 ID 顺序整体重排（测速排序用）。
+  ///
+  /// [orderedIds] 里没有的源保持原有相对顺序排在最后 —— 停用 / 未测速的
+  /// 源不该因为「没出现在排序结果里」而跳到最前面。
+  Future<void> applyOrder(List<String> orderedIds) async {
+    if (_sources.length < 2) return;
+    final Map<String, int> rank = <String, int>{
+      for (int i = 0; i < orderedIds.length; i++) orderedIds[i]: i,
+    };
+    final List<VodSource> original = List<VodSource>.of(_sources);
+    final Map<String, int> originalIndex = <String, int>{
+      for (int i = 0; i < original.length; i++) original[i].id: i,
+    };
+    _sources.sort((VodSource a, VodSource b) {
+      final int ra = rank[a.id] ?? 1 << 20;
+      final int rb = rank[b.id] ?? 1 << 20;
+      if (ra != rb) return ra.compareTo(rb);
+      return (originalIndex[a.id] ?? 0).compareTo(originalIndex[b.id] ?? 0);
+    });
+    if (_sameOrder(original, _sources)) return;
+    for (int i = 0; i < _sources.length; i++) {
+      _sources[i] = _sources[i].copyWith(sort: i);
+    }
+    await _persist();
+    _emit();
+  }
+
+  static bool _sameOrder(List<VodSource> a, List<VodSource> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id) return false;
+    }
+    return true;
+  }
+
   void _ensureActive() {
     if (_sources.isEmpty) {
       _activeId = '';

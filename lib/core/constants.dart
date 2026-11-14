@@ -91,12 +91,33 @@ class K {
   static const double miniWindowWidth = 420;
   static const double miniWindowHeight = 236;
 
+  // ---------------- 观看统计 ----------------
+  /// 累计多少毫秒算「一段」观看时长，攒够才落一次盘。
+  ///
+  /// 播放进度流每秒会跳好几次，每跳都写文件既费 IO 又会让
+  /// shared_preferences 式的整文件写放大约百倍。30 秒一段也意味着
+  /// 进程被强杀时最多丢半分钟的统计。
+  static const int watchFlushMs = 30000;
+
+  /// 两次进度之间超过这个跨度就不计入观看时长 —— 那是拖动进度条、
+  /// 卡顿重连或者自动跳集，属于「跳过去」而不是「看过去」。
+  static const int watchMaxTickJumpMs = 15000;
+
+  /// 统计保留天数。再往前的按天数据会被自动裁掉。
+  static const int watchStatsKeepDays = 120;
+
   // ---------------- 存储 ----------------
   static const String boxSources = 'sources.json';
   static const String boxFavorites = 'favorites.json';
   static const String boxHistory = 'history.json';
   static const String boxSearches = 'searches.json';
   static const String boxSyncTombstones = 'sync_tombstones.json';
+
+  /// 资源站测速结果。
+  static const String boxSourceHealth = 'source_health.json';
+
+  /// 观看时长统计（按天 + 片名 + 来源汇总）。
+  static const String boxWatchStats = 'watch_stats.json';
 
   /// 按片名记住的片头片尾秒数。独立于播放记录：换源、清历史都还在。
   static const String boxShowMarks = 'show_marks.json';

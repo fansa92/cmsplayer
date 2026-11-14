@@ -9,6 +9,7 @@ import '../../data/models/vod_source.dart';
 import '../../state/history_store.dart';
 import '../../state/source_store.dart';
 import '../actions.dart';
+import '../navigation.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/vod_card.dart';
 
@@ -120,6 +121,7 @@ class _HistoryPageState extends State<HistoryPage> {
           onToggleAll: () => _toggleAll(keys),
           onDelete: () => _deleteSelected(selected.toList()),
           onClear: () => _confirmClear(context, history),
+          onStats: () => AppRoutes.openStats(context),
         ),
         Expanded(
           child: GridView.builder(
@@ -217,6 +219,7 @@ class _Toolbar extends StatelessWidget {
     required this.onToggleAll,
     required this.onDelete,
     required this.onClear,
+    required this.onStats,
   });
 
   final int count;
@@ -228,6 +231,7 @@ class _Toolbar extends StatelessWidget {
   final VoidCallback onToggleAll;
   final VoidCallback onDelete;
   final VoidCallback onClear;
+  final VoidCallback onStats;
 
   @override
   Widget build(BuildContext context) {
@@ -276,6 +280,11 @@ class _Toolbar extends StatelessWidget {
             ),
           ),
           const Spacer(),
+          IconButton(
+            tooltip: '观看统计',
+            onPressed: onStats,
+            icon: const Icon(Icons.insights_outlined),
+          ),
           TextButton.icon(
             onPressed: count > 1 ? onEnterSelection : null,
             icon: const Icon(Icons.checklist, size: 18),

@@ -21,6 +21,7 @@ import '../../state/history_store.dart';
 import '../../state/source_store.dart';
 import '../../state/sync_store.dart';
 import '../actions.dart';
+import '../navigation.dart';
 import '../widgets/backup_prompt.dart';
 import '../widgets/hint_paragraph.dart';
 import '../widgets/update_prompt.dart';
@@ -220,6 +221,13 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => const SyncPage()),
             ),
+          ),
+          const _SectionLabel('数据'),
+          ListTile(
+            leading: const Icon(Icons.insights_outlined),
+            title: const Text('观看统计'),
+            subtitle: const Text('按天、按片名、按来源汇总本机观看时长'),
+            onTap: () => AppRoutes.openStats(context),
           ),
           const _SectionLabel('存储'),
           ListTile(

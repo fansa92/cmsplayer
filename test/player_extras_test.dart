@@ -12,6 +12,7 @@ import 'package:cms_player/data/models/vod_item.dart';
 import 'package:cms_player/state/app_state.dart';
 import 'package:cms_player/state/history_store.dart';
 import 'package:cms_player/state/source_store.dart';
+import 'package:cms_player/state/watch_stats_store.dart';
 import 'package:cms_player/ui/player/player_controller.dart';
 import 'package:cms_player/ui/player/player_window.dart';
 
@@ -229,6 +230,38 @@ void main() {
       final bool ok = await c.loadSubtitleUrl('sub.srt');
       expect(ok, isFalse);
       expect(c.fallbackNotice, contains('链接不完整'));
+    });
+  });
+
+  group('观看时长统计', () {
+    test('正常播放才累计，拖动进度不计入', () async {
+      final PlayerController c = await mount();
+      rig.platform.emitPlaying(true);
+      await rig.settle(4);
+
+      // 正常播放 35 秒：每次前进 5 秒，共 7 跳。
+      for (int i = 1; i <= 7; i++) {
+        rig.platform.emitPosition(Duration(seconds: i * 5));
+        await rig.settle(2);
+      }
+      await rig.waitUntil(
+        () => WatchStatsStore.instance.totalSeconds >= 30,
+      );
+      final int played = WatchStatsStore.instance.totalSeconds;
+      expect(played, inInclusiveRange(30, 35));
+
+      // 拖到第 5 分钟：跨了四分多钟，那段并没有看，不能算。
+      rig.platform.emitPosition(const Duration(minutes: 5));
+      await rig.settle(4);
+      expect(WatchStatsStore.instance.totalSeconds, played);
+
+      // 暂停状态下的进度变化同样不算。
+      rig.platform.emitPlaying(false);
+      rig.platform.emitPosition(const Duration(minutes: 5, seconds: 20));
+      await rig.settle(4);
+      expect(WatchStatsStore.instance.totalSeconds, played);
+
+      expect(c.position.inMinutes, 5);
     });
   });
 

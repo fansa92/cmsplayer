@@ -6,7 +6,9 @@ import '../data/models/vod_source.dart';
 import 'pages/detail_page.dart';
 import 'pages/keyword_page.dart';
 import 'pages/rank_page.dart';
+import 'pages/source_compare_page.dart';
 import 'pages/source_page.dart';
+import 'pages/stats_page.dart';
 import 'pages/updates_page.dart';
 import 'player/player_page.dart';
 
@@ -59,6 +61,26 @@ class AppRoutes {
   static Future<void> openUpdates(BuildContext context) {
     return Navigator.of(context).push<void>(
       MaterialPageRoute<void>(builder: (_) => const UpdatesPage()),
+    );
+  }
+
+  /// 全源对比：同一部片在各启用源里的集数 / 线路 / 播放地址。
+  static Future<void> openCompare(
+    BuildContext context, {
+    required String title,
+    String year = '',
+  }) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => SourceComparePage(title: title, year: year),
+      ),
+    );
+  }
+
+  /// 观看统计。
+  static Future<void> openStats(BuildContext context) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const StatsPage()),
     );
   }
 

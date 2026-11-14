@@ -12,8 +12,10 @@ import 'state/history_store.dart';
 import 'state/home_store.dart';
 import 'state/rank_store.dart';
 import 'state/search_store.dart';
+import 'state/source_health_store.dart';
 import 'state/source_store.dart';
 import 'state/sync_store.dart';
+import 'state/watch_stats_store.dart';
 import 'ui/shell/app_shell.dart';
 
 /// 应用根组件：负责依赖注入与主题切换。
@@ -64,6 +66,9 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
     await _historyStore.load();
     // 片头片尾标记：播放器读它是同步的，启动时先加载好。
     await ShowMarksStore.instance.ensureLoaded();
+    // 观看统计与源测速结果：文件都很小，一起读完，省得进页面时再等。
+    await WatchStatsStore.instance.ensureLoaded();
+    await SourceHealthStore.instance.ensureLoaded();
     // 同步配置只是读几个字符串，不值得塞进上面的 await 链里拖慢启动；
     // 但要保证同步页第一次打开时它已经就绪。
     _syncStore.load();
