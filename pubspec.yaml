@@ -35,6 +35,7 @@ dependencies:
   window_manager: ^0.5.2
   battery_plus: ^7.1.2
   charset: ^2.0.1
+  tray_manager: 0.5.3
 
 dev_dependencies:
   flutter_test:
@@ -43,3 +44,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # 托盘图标：Windows 用 .ico，macOS / Linux 用 png
+    - assets/icons/tray_icon.ico
+    - assets/icons/tray_icon.png

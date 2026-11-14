@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../../core/deep_link.dart';
 import '../../core/utils/responsive.dart';
@@ -11,6 +12,7 @@ import '../../data/models/vod_source.dart';
 import '../../state/browse_store.dart';
 import '../../state/favorites_store.dart';
 import '../../state/home_store.dart';
+import '../../state/app_state.dart';
 import '../../state/search_store.dart';
 import '../../state/source_store.dart';
 import '../actions.dart';
@@ -24,6 +26,8 @@ import '../pages/settings_page.dart';
 import '../pages/source_page.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/source_switcher.dart';
+import 'desktop_shell.dart';
+import 'tray_service.dart';
 
 /// 主外壳：根据窗口宽度在「侧边导航栏」与「底部导航栏」之间切换。
 class AppShell extends StatefulWidget {
@@ -33,7 +37,7 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WindowListener {
   static const List<_Destination> _destinations = <_Destination>[
     _Destination('首页', Icons.home_outlined, Icons.home),
     _Destination('分类', Icons.grid_view_outlined, Icons.grid_view),
@@ -50,9 +54,19 @@ class _AppShellState extends State<AppShell> {
   SourceStore? _watched;
   bool _attached = false;
 
+  /// 是否挂上了窗口监听（只有桌面端初始化成功才会挂）。
+  bool _windowHooked = false;
+
+  /// 拖动 / 缩放窗口时攒一攒再落盘，别每一帧都写一次设置。
+  Timer? _boundsSave;
+
   @override
   void initState() {
     super.initState();
+    if (DesktopShell.enabled) {
+      windowManager.addListener(this);
+      _windowHooked = true;
+    }
     DeepLink.pendingImport.addListener(_consumeDeepLink);
     // 启动参数可能在外壳挂载前就解析好了，补一次首帧消费。
     WidgetsBinding.instance.addPostFrameCallback((_) => _consumeDeepLink());
@@ -110,8 +124,35 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  // ------------------------------------------------------------ 窗口事件
+
+  @override
+  void onWindowClose() {
+    if (!mounted) return;
+    final AppState app = context.read<AppState>();
+    // 托盘没挂上时不能藏窗口：那样就再也叫不回来了。
+    final bool toTray = app.closeToTray && TrayService.instance.ready;
+    unawaited(toTray ? DesktopShell.hide() : DesktopShell.quit());
+  }
+
+  @override
+  void onWindowMoved() => _scheduleBoundsSave();
+
+  @override
+  void onWindowResized() => _scheduleBoundsSave();
+
+  void _scheduleBoundsSave() {
+    if (!_windowHooked) return;
+    _boundsSave?.cancel();
+    _boundsSave = Timer(const Duration(milliseconds: 1200), () {
+      unawaited(DesktopShell.saveBounds());
+    });
+  }
+
   @override
   void dispose() {
+    _boundsSave?.cancel();
+    if (_windowHooked) windowManager.removeListener(this);
     DeepLink.pendingImport.removeListener(_consumeDeepLink);
     _watched?.removeListener(_onSourceChanged);
     _searchFocus.dispose();

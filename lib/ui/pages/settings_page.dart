@@ -22,6 +22,7 @@ import '../../state/source_store.dart';
 import '../../state/sync_store.dart';
 import '../actions.dart';
 import '../navigation.dart';
+import '../shell/tray_service.dart';
 import '../widgets/backup_prompt.dart';
 import '../widgets/hint_paragraph.dart';
 import '../widgets/update_prompt.dart';
@@ -205,6 +206,20 @@ class _SettingsPageState extends State<SettingsPage> {
             value: app.hardwareDecode,
             onChanged: (bool v) => app.setHardwareDecode(v),
           ),
+          if (PlatformInfo.isDesktop) ...<Widget>[
+            const _SectionLabel('桌面'),
+            SwitchListTile(
+              secondary: const Icon(Icons.minimize),
+              title: const Text('关闭窗口时收进托盘'),
+              subtitle: Text(
+                TrayService.instance.ready
+                    ? '窗口藏到托盘，从托盘菜单「退出」才真正关闭'
+                    : '当前系统托盘不可用，关闭按钮会直接退出',
+              ),
+              value: app.closeToTray,
+              onChanged: (bool v) => app.setCloseToTray(v),
+            ),
+          ],
           const _SectionLabel('搜索'),
           SwitchListTile(
             secondary: const Icon(Icons.all_inclusive),

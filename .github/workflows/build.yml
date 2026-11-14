@@ -343,10 +343,15 @@ jobs:
           #   注意 Linux 端不自带这两个库：media_kit_libs_video 压根没有 linux 目录，
           #   而 media_kit_libs_linux（media_kit 的传递依赖）只下载 mimalloc，
           #   所以只能靠系统的 -dev 包提供头文件与 .pc。
+          #
+          # libayatana-appindicator3-dev：tray_manager 的 linux/CMakeLists.txt
+          #   pkg_check_modules(APPINDICATOR ayatana-appindicator3-0.1)，
+          #   找不到就直接 FATAL_ERROR，整个 linux 构建会挂。
           sudo apt-get install -y --no-install-recommends \
             clang cmake ninja-build pkg-config libgtk-3-dev \
             libasound2-dev libmpv-dev libepoxy-dev patchelf file \
-            rpm libarchive-tools xz-utils
+            rpm libarchive-tools xz-utils \
+            libayatana-appindicator3-dev
 
       - name: 安装 fastforge
         run: |

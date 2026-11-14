@@ -88,6 +88,14 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 关闭窗口时收进托盘（仅桌面端有意义）。
+  bool get closeToTray => _settings.closeToTray;
+
+  Future<void> setCloseToTray(bool v) async {
+    await _settings.setCloseToTray(v);
+    notifyListeners();
+  }
+
   // ---------------- 详情页 ----------------
   bool get episodeOrderReverse => _settings.episodeOrderReverse;
 

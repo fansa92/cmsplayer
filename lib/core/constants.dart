@@ -143,6 +143,13 @@ class K {
   static const String prefLastRate = 'last_rate';
   static const String prefLastFit = 'last_fit';
 
+  // ---------------- 桌面窗口 ----------------
+  /// 关闭窗口时收进托盘（默认开）。
+  static const String prefCloseToTray = 'close_to_tray';
+
+  /// 上次退出时的窗口位置与尺寸，格式 `left,top,width,height`。
+  static const String prefWindowBounds = 'window_bounds';
+
   // ---------------- 订阅 ----------------
   /// 启动时自动刷新订阅的最小间隔：比这更新的就不重复拉。
   static const Duration subscriptionAutoRefresh = Duration(hours: 12);

@@ -43,6 +43,39 @@ class SettingsStore {
     await _prefs?.setInt(K.prefThemeMode, raw);
   }
 
+  // ---------------- 桌面窗口 ----------------
+  /// 关闭窗口时收进托盘。桌面端默认开，移动端用不到这个值。
+  bool get closeToTray => _prefs?.getBool(K.prefCloseToTray) ?? true;
+
+  Future<void> setCloseToTray(bool v) async {
+    await _prefs?.setBool(K.prefCloseToTray, v);
+  }
+
+  /// 上次退出时的窗口位置与尺寸；没记过或数据不合理时返回 null。
+  Rect? get windowBounds {
+    final List<String> parts =
+        (_prefs?.getString(K.prefWindowBounds) ?? '').split(',');
+    if (parts.length != 4) return null;
+    final List<double?> nums =
+        parts.map((String e) => double.tryParse(e.trim())).toList();
+    if (nums.any((double? v) => v == null)) return null;
+    final Rect rect =
+        Rect.fromLTWH(nums[0]!, nums[1]!, nums[2]!, nums[3]!);
+    // 比最小窗口还小、或者跑到屏幕外很远的位置，都当作没记过：
+    // 显示器拔掉之后，旧坐标可能落在不存在的区域上。
+    if (rect.width < 480 || rect.height < 360) return null;
+    if (rect.left < -10000 || rect.top < -10000) return null;
+    return rect;
+  }
+
+  Future<void> setWindowBounds(Rect rect) async {
+    await _prefs?.setString(
+      K.prefWindowBounds,
+      '${rect.left.round()},${rect.top.round()},'
+      '${rect.width.round()},${rect.height.round()}',
+    );
+  }
+
   // ---------------- 源 ----------------
   String get activeSourceId => _prefs?.getString(K.prefActiveSource) ?? '';
 
@@ -229,6 +262,7 @@ class SettingsStore {
         'hardwareDecode': hardwareDecode,
         'multiSourceSearch': multiSourceSearch,
         'exactSearch': exactSearch,
+        'closeToTray': closeToTray,
         'episodeOrderReverse': episodeOrderReverse,
         'autoSkipIntro': autoSkipIntro,
         'autoSkipOutro': autoSkipOutro,

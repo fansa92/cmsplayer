@@ -11,6 +11,7 @@ import '../../core/utils/responsive.dart';
 import '../../data/models/play_task.dart';
 import '../../state/app_state.dart';
 import '../../state/history_store.dart';
+import '../../state/playback_bridge.dart';
 import '../../state/source_store.dart';
 import 'player_controls.dart';
 import 'player_controller.dart';
@@ -39,6 +40,8 @@ class _PlayerPageState extends State<PlayerPage> {
       history: context.read<HistoryStore>(),
       sources: context.read<SourceStore>(),
     );
+    // 托盘菜单要控制播放，但它不在播放页的树里，挂到全局桥接上。
+    PlaybackBridge.attach(_controller);
     _enterPlaybackUi();
   }
 
@@ -89,6 +92,8 @@ class _PlayerPageState extends State<PlayerPage> {
     if (PlayerWindow.miniActive) unawaited(PlayerWindow.setMini(false));
     // 先恢复系统 UI，再释放播放器（顺序反过来会在部分机型上闪一下状态栏）。
     _exitPlaybackUi();
+    // 先摘桥接再释放控制器：反过来会让监听落在已 dispose 的对象上。
+    PlaybackBridge.detach(_controller);
     _controller.dispose();
     super.dispose();
   }

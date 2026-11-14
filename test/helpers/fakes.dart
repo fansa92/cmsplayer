@@ -11,9 +11,12 @@ import 'package:cms_player/data/api/maccms_api.dart';
 import 'package:cms_player/data/models/vod_source.dart';
 import 'package:cms_player/data/repository/vod_repository.dart';
 import 'package:cms_player/data/sync/sync_tombstones.dart';
+import 'package:cms_player/state/playback_bridge.dart';
 import 'package:cms_player/state/source_health_store.dart';
 import 'package:cms_player/state/source_store.dart';
 import 'package:cms_player/state/subscription_store.dart';
+import 'package:cms_player/ui/shell/desktop_shell.dart';
+import 'package:cms_player/ui/shell/tray_service.dart';
 import 'package:cms_player/state/watch_stats_store.dart';
 
 /// 被假客户端记录下来的一次请求。
@@ -160,6 +163,9 @@ void useIsolatedStores() {
     SourceHealthStore.instance.resetForTest();
     SubscriptionStore.resetFetcher();
     SubscriptionStore.resetClock();
+    PlaybackBridge.resetForTest();
+    await TrayService.resetForTest();
+    DesktopShell.resetForTest();
     await SyncTombstones.instance.clearAll();
   });
 
@@ -171,6 +177,9 @@ void useIsolatedStores() {
     ShowMarksStore.instance.resetForTest();
     WatchStatsStore.instance.resetForTest();
     SourceHealthStore.instance.resetForTest();
+    PlaybackBridge.resetForTest();
+    await TrayService.resetForTest();
+    DesktopShell.resetForTest();
     await SyncTombstones.instance.clearAll();
     JsonStore.overrideDirectory = null;
     // Windows 上刚写过的文件句柄不会立刻释放，直接递归删偶发

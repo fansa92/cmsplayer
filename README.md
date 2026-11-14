@@ -29,6 +29,8 @@
 | 片头片尾 | 按片名记住片头结束 / 片尾开始（换源、清空历史后仍然生效），开播自动跳过片头、播到片尾直接进下一集（可关） |
 | 桌面播放 | 窗口全屏、迷你悬浮窗（置顶 · 420×236）、鼠标移动唤出控制栏、空格 / 方向键 / F 快捷键、系统媒体键（播放 / 暂停 / 上一集 / 下一集） |
 | 外部唤起 | `cmsplayer://import?url=…`、`--import=…` 或直接拖一个 `.json` 地址，启动后自动把这批源并进列表 |
+| 系统托盘 | 关窗口默认收进托盘不退出；托盘菜单可直接「播放 / 暂停、上一集、下一集、显示主窗口、退出」，悬浮提示显示当前片名；设置里可关掉「关闭窗口时收进托盘」 |
+| 窗口记忆 | 记住上次的窗口大小与位置，下次启动原样恢复；最小化 / 全屏状态下的尺寸不作为记忆值 |
 | 记忆播放 | 按「源 + 影片 + 线路 + 集数」记住进度，下次进来自动跳转 |
 | 收藏 / 历史 | 本地 JSON 持久化，支持按源筛选、滑动删除、清空；收藏会按源批量比对集数，有新集时打「更新至 N 集」角标并可筛选；「追剧更新」页按新增集数排开所有更新、可一键全部已读；历史可长按进入多选批量删除 |
 | 备份导出 | 播放记录 / 收藏 / 源 / 搜索词 / 设置一键导出成单个 JSON 文件（不含任何凭据） |
@@ -238,7 +240,7 @@ lib/
 │   └── repository/               Vod / Source / Record 三个仓库
 ├── state/                        ChangeNotifier：Browse / Home / Search / Favorites / History / Source / Rank / App
 │                                 + SourceHealth（测速结果） / SourceCompare（全源对比） / WatchStats（观看时长）
-│                                 + Subscription（订阅维护）
+│                                 + Subscription（订阅维护） / Playback（播放器全局把手，托盘菜单用）
 └── ui/
     ├── pages/                    首页 / 分类 / 搜索 / 收藏 / 追剧更新 / 历史 / 详情 / 关键词结果 / 榜单 /
     │                             源管理 / 订阅源 / 全源对比 / 观看统计 / 设置
@@ -246,6 +248,8 @@ lib/
     │                             弹层 player_sheets / PlayerController + PlayerPage / 全屏与迷你窗 player_window
     ├── widgets/                  CachedImage / VodCard / VodGrid / PosterSkeleton / OptionPicker
     ├── shell/                    app_shell 自适应导航 + app_shortcuts 全局快捷键
+    │                             + desktop_shell（窗口尺寸·位置记忆·收托盘）
+    │                             + tray_service（托盘图标与播放控制菜单）
     └── navigation.dart           统一跳转入口
 ```
 
@@ -311,6 +315,8 @@ lib/
 | 订阅刷新后少了几个源 | 订阅里已经去掉的站只会被**停用**（列表里显示「已停用」），不会删除；想彻底清掉手动删除即可 |
 | 搜索「精确」之后没结果 | 精确模式按归一化片名完全相等来筛，`庆余年` 不会命中 `庆余年 第二季`；关掉它再试 |
 | 媒体键没反应 | 需要窗口处于焦点状态。系统级全局媒体键要额外的原生钩子，当前没做 |
+| 点了关闭窗口却没退出 | 默认「关闭窗口时收进托盘」，从托盘图标右键菜单选「退出」才真正关闭；不想要这个行为到设置 → 桌面里关掉 |
+| Linux 上没有托盘图标 | GNOME 需要装 AppIndicator 扩展（`gnome-shell-extension-appindicator`）；构建机还要装 `libayatana-appindicator3-dev`，否则 linux 构建会直接失败 |
 
 ---
 
