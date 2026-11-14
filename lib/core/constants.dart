@@ -122,6 +122,9 @@ class K {
   /// 按片名记住的片头片尾秒数。独立于播放记录：换源、清历史都还在。
   static const String boxShowMarks = 'show_marks.json';
 
+  /// 订阅（一个地址拉一批源）。
+  static const String boxSubscriptions = 'subscriptions.json';
+
   static const String prefThemeMode = 'theme_mode';
   static const String prefActiveSource = 'active_source_id';
   static const String prefDefaultRate = 'default_rate';
@@ -136,6 +139,13 @@ class K {
   static const String prefAutoSkipOutro = 'auto_skip_outro';
   static const String prefRememberSkipMarks = 'remember_skip_marks';
   static const String prefImageCacheBytes = 'image_cache_bytes';
+  static const String prefExactSearch = 'exact_search';
+  static const String prefLastRate = 'last_rate';
+  static const String prefLastFit = 'last_fit';
+
+  // ---------------- 订阅 ----------------
+  /// 启动时自动刷新订阅的最小间隔：比这更新的就不重复拉。
+  static const Duration subscriptionAutoRefresh = Duration(hours: 12);
 
   // ---------------- 同步 ----------------
   static const Duration syncTimeout = Duration(seconds: 25);

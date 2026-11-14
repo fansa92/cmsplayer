@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/deep_link.dart';
 import '../../core/utils/responsive.dart';
 import 'app_shortcuts.dart';
 import 'lazy_indexed_stack.dart';
@@ -10,6 +13,7 @@ import '../../state/favorites_store.dart';
 import '../../state/home_store.dart';
 import '../../state/search_store.dart';
 import '../../state/source_store.dart';
+import '../actions.dart';
 import '../navigation.dart';
 import '../pages/category_page.dart';
 import '../pages/favorites_page.dart';
@@ -47,6 +51,14 @@ class _AppShellState extends State<AppShell> {
   bool _attached = false;
 
   @override
+  void initState() {
+    super.initState();
+    DeepLink.pendingImport.addListener(_consumeDeepLink);
+    // 启动参数可能在外壳挂载前就解析好了，补一次首帧消费。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _consumeDeepLink());
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _syncSource();
@@ -76,8 +88,31 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
+  /// 消费一次外部导入请求（`cmsplayer://import?url=…`）。
+  void _consumeDeepLink() {
+    final String? url = DeepLink.pendingImport.value;
+    if (url == null || !mounted) return;
+    DeepLink.pendingImport.value = null;
+    unawaited(_importSources(url));
+  }
+
+  Future<void> _importSources(String url) async {
+    try {
+      final int added = await context.read<SourceStore>().importFromUrl(url);
+      if (!mounted) return;
+      AppActions.snack(
+        context,
+        added > 0 ? '已导入 $added 个资源站' : '这些资源站都已在列表里，没有新增',
+      );
+    } on Object catch (e) {
+      if (!mounted) return;
+      AppActions.snackError(context, e);
+    }
+  }
+
   @override
   void dispose() {
+    DeepLink.pendingImport.removeListener(_consumeDeepLink);
     _watched?.removeListener(_onSourceChanged);
     _searchFocus.dispose();
     super.dispose();

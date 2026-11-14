@@ -13,6 +13,7 @@ import 'package:cms_player/data/repository/vod_repository.dart';
 import 'package:cms_player/data/sync/sync_tombstones.dart';
 import 'package:cms_player/state/source_health_store.dart';
 import 'package:cms_player/state/source_store.dart';
+import 'package:cms_player/state/subscription_store.dart';
 import 'package:cms_player/state/watch_stats_store.dart';
 
 /// 被假客户端记录下来的一次请求。
@@ -157,6 +158,8 @@ void useIsolatedStores() {
     ShowMarksStore.instance.resetForTest();
     WatchStatsStore.instance.resetForTest();
     SourceHealthStore.instance.resetForTest();
+    SubscriptionStore.resetFetcher();
+    SubscriptionStore.resetClock();
     await SyncTombstones.instance.clearAll();
   });
 

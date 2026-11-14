@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -14,6 +16,7 @@ import 'state/rank_store.dart';
 import 'state/search_store.dart';
 import 'state/source_health_store.dart';
 import 'state/source_store.dart';
+import 'state/subscription_store.dart';
 import 'state/sync_store.dart';
 import 'state/watch_stats_store.dart';
 import 'ui/shell/app_shell.dart';
@@ -43,6 +46,10 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
   /// 排序选择也能保留。
   late final RankStore _rankStore = RankStore();
 
+  /// 订阅：一个地址维护一批源，构造时要往 [SourceStore] 里并源。
+  late final SubscriptionStore _subscriptionStore =
+      SubscriptionStore(_sourceStore);
+
   /// 同步。依赖上面三个 Store —— [SyncStore] 的构造参数就是它们。
   ///
   /// `late final` 是惰性初始化的，首次访问时才构造，所以这里引用前面的
@@ -62,6 +69,9 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
 
   Future<void> _bootstrap() async {
     await _sourceStore.load();
+    await _subscriptionStore.load();
+    // 订阅保鲜：太久没拉过的在后台补一轮，不挡启动。
+    unawaited(_subscriptionStore.refreshStale());
     await _favoritesStore.load();
     await _historyStore.load();
     // 片头片尾标记：播放器读它是同步的，启动时先加载好。
@@ -78,6 +88,7 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
   void dispose() {
     _appState.dispose();
     _sourceStore.dispose();
+    _subscriptionStore.dispose();
     _browseStore.dispose();
     _homeStore.dispose();
     _searchStore.dispose();
@@ -94,6 +105,7 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
       providers: [
         ChangeNotifierProvider<AppState>.value(value: _appState),
         ChangeNotifierProvider<SourceStore>.value(value: _sourceStore),
+        ChangeNotifierProvider<SubscriptionStore>.value(value: _subscriptionStore),
         ChangeNotifierProvider<BrowseStore>.value(value: _browseStore),
         ChangeNotifierProvider<HomeStore>.value(value: _homeStore),
         ChangeNotifierProvider<SearchStore>.value(value: _searchStore),

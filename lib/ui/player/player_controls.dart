@@ -257,6 +257,37 @@ class _PlayerControlsState extends State<PlayerControls> {
         }
         return KeyEventResult.handled;
 
+      // 系统媒体键：桌面端键盘 / 耳机线控按下时由系统转成这些按键。
+      // 窗口没焦点时收不到（那需要全局热键钩子），但"正在看视频顺手按一下
+      // 键盘上的播放键"这个最常见场景能覆盖。
+      case LogicalKeyboardKey.mediaPlayPause:
+      case LogicalKeyboardKey.mediaPlay:
+      case LogicalKeyboardKey.mediaPause:
+        if (locked) return KeyEventResult.handled;
+        if (!repeat) {
+          controller.togglePlay();
+          _show();
+        }
+        return KeyEventResult.handled;
+
+      case LogicalKeyboardKey.mediaTrackNext:
+        if (locked) return KeyEventResult.handled;
+        if (!repeat) {
+          controller.next();
+          _showOsd('下一集');
+          _show();
+        }
+        return KeyEventResult.handled;
+
+      case LogicalKeyboardKey.mediaTrackPrevious:
+        if (locked) return KeyEventResult.handled;
+        if (!repeat) {
+          controller.previous();
+          _showOsd('上一集');
+          _show();
+        }
+        return KeyEventResult.handled;
+
       // F 只改窗口形态，不碰播放内容，锁定时照常可用。
       case LogicalKeyboardKey.keyF:
         if (!repeat) _toggleFullScreen();

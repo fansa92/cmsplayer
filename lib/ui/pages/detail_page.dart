@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart' show SliverConstraints;
 import 'package:provider/provider.dart';
 
 import '../../core/utils/responsive.dart';
+import '../../core/utils/season.dart';
 import '../../data/models/paged_result.dart';
 import '../../data/models/play_line.dart';
 import '../../data/models/play_record.dart';
@@ -57,6 +58,9 @@ class _DetailPageState extends State<DetailPage> {
   bool _loadingDetail = false;
   String? _error;
   int _lineIndex = 0;
+
+  /// 当前查看的季度（null 表示"全部"）。换线路时重置。
+  int? _seasonFilter;
   bool _contentExpanded = false;
 
   /// 续播定位只做一次：之后用户自己切线路、切集，不该被弹回去。
@@ -606,9 +610,21 @@ class _DetailPageState extends State<DetailPage> {
     final PlayLine line = lines[lineIdx];
     final bool resumeOnThisLine = record != null && record.lineIndex == lineIdx;
     final bool reverse = context.watch<AppState>().episodeOrderReverse;
-    final List<int> order = reverse
-        ? <int>[for (int i = line.episodes.length - 1; i >= 0; i--) i]
-        : <int>[for (int i = 0; i < line.episodes.length; i++) i];
+    // 多季剧的集名里带「第 N 季」，抽出季度做一层筛选；
+    // 单季剧 groupBySeason 直接返回空列表，不会多出一排筛选条。
+    final List<SeasonGroup> seasons = groupBySeason(line.episodes);
+    final bool canGroupBySeason = seasons.length > 1;
+    final int? season = canGroupBySeason ? _seasonFilter : null;
+    final SeasonGroup? activeSeason = season == null
+        ? null
+        : seasons.firstWhere(
+            (SeasonGroup g) => g.season == season,
+            orElse: () => seasons.first,
+          );
+    final List<int> base = activeSeason == null
+        ? <int>[for (int i = 0; i < line.episodes.length; i++) i]
+        : List<int>.of(activeSeason.indices);
+    final List<int> order = reverse ? base.reversed.toList() : base;
 
     return <Widget>[
       SliverToBoxAdapter(
@@ -632,10 +648,34 @@ class _DetailPageState extends State<DetailPage> {
                       label: Text(
                           '${lines[i].name} (${lines[i].episodes.length})'),
                       selected: i == lineIdx,
-                      onSelected: (_) => setState(() => _lineIndex = i),
+                      onSelected: (_) => setState(() {
+                        _lineIndex = i;
+                        _seasonFilter = null;
+                      }),
                     ),
                 ],
               ),
+            if (canGroupBySeason) ...<Widget>[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  ChoiceChip(
+                    label: Text('全部 ${line.episodes.length}'),
+                    selected: season == null,
+                    onSelected: (_) => setState(() => _seasonFilter = null),
+                  ),
+                  for (final SeasonGroup g in seasons)
+                    ChoiceChip(
+                      label: Text('${g.label} (${g.indices.length})'),
+                      selected: season == g.season,
+                      onSelected: (_) =>
+                          setState(() => _seasonFilter = g.season),
+                    ),
+                ],
+              ),
+            ],
             const SizedBox(height: 14),
             Row(
               children: <Widget>[
@@ -665,7 +705,9 @@ class _DetailPageState extends State<DetailPage> {
                   TextButton.icon(
                     icon: const Icon(Icons.play_circle_outline, size: 18),
                     label: const Text('从头播放'),
-                    onPressed: () => _play(lineIdx, 0),
+                    // 「从头」指当前这一季的第一集，不是整部剧的第一集。
+                    onPressed: () =>
+                        _play(lineIdx, base.isEmpty ? 0 : base.first),
                   ),
               ],
             ),

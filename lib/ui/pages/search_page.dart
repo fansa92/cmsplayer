@@ -10,6 +10,7 @@ import '../../state/search_store.dart';
 import '../../state/source_store.dart';
 import '../navigation.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/grouped_vod_grid.dart';
 import '../widgets/poster_skeleton.dart';
 import '../widgets/vod_grid.dart';
 
@@ -79,22 +80,24 @@ class _SearchPageState extends State<SearchPage>
   Future<void> _execute(String q) async {
     if (!mounted) return;
     final SourceStore sourceStore = context.read<SourceStore>();
-    final bool multi = context.read<AppState>().multiSourceSearch &&
-        sourceStore.enabledSources.length > 1;
+    final AppState app = context.read<AppState>();
+    final bool multi =
+        app.multiSourceSearch && sourceStore.enabledSources.length > 1;
     await context.read<SearchStore>().search(
           keyword: q,
           active: sourceStore.active,
           all: sourceStore.enabledSources,
           multiSource: multi,
+          exact: app.exactSearch,
         );
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final ThemeData theme = Theme.of(context);
     final SearchStore store = context.watch<SearchStore>();
     final SourceStore sourceStore = context.watch<SourceStore>();
+    final AppState app = context.watch<AppState>();
     final bool compact = context.isCompact;
 
     return Column(
@@ -169,32 +172,47 @@ class _SearchPageState extends State<SearchPage>
             ],
           ),
         ),
-        if (sourceStore.enabledSources.length > 1)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
             child: Row(
               children: <Widget>[
+                if (sourceStore.enabledSources.length > 1) ...<Widget>[
+                  FilterChip(
+                    label: Text(
+                      '搜索全部 ${sourceStore.enabledSources.length} 个源',
+                    ),
+                    selected: store.multiSource,
+                    onSelected: (bool v) {
+                      store.setMultiSource(v);
+                      context.read<AppState>().setMultiSourceSearch(v);
+                      if (store.query.isNotEmpty) _search(store.query);
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 FilterChip(
-                  label: Text('搜索全部 ${sourceStore.enabledSources.length} 个源'),
-                  selected: store.multiSource,
+                  label: const Text('精确'),
+                  tooltip: '只保留片名完全一致的影片',
+                  selected: app.exactSearch,
                   onSelected: (bool v) {
-                    store.setMultiSource(v);
-                    context.read<AppState>().setMultiSourceSearch(v);
+                    context.read<AppState>().setExactSearch(v);
+                    store.setExact(v);
                     if (store.query.isNotEmpty) _search(store.query);
                   },
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    store.multiSource ? '结果会合并去重' : '仅搜索当前源',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                if (store.sourceHits.length > 1) ...<Widget>[
+                  const SizedBox(width: 8),
+                  FilterChip(
+                    label: const Text('按源分组'),
+                    tooltip: '每个资源站各列一份，可折叠',
+                    selected: store.groupBySource,
+                    onSelected: store.setGroupBySource,
                   ),
-                ),
-                if (store.query.isNotEmpty)
+                ],
+                if (store.query.isNotEmpty) ...<Widget>[
+                  const SizedBox(width: 4),
                   TextButton.icon(
                     style: TextButton.styleFrom(
                       visualDensity: VisualDensity.compact,
@@ -207,9 +225,11 @@ class _SearchPageState extends State<SearchPage>
                       title: store.query,
                     ),
                   ),
+                ],
               ],
             ),
           ),
+        ),
         if (store.suggestions.isNotEmpty &&
             _controller.text.trim().isNotEmpty &&
             _controller.text.trim() != store.query)
@@ -225,6 +245,7 @@ class _SearchPageState extends State<SearchPage>
     SearchStore store,
     SourceStore sourceStore,
   ) {
+    final AppState app = context.read<AppState>();
     if (store.query.isEmpty) {
       return _HistoryPanel(store: store, onPick: _pickHistory);
     }
@@ -241,9 +262,37 @@ class _SearchPageState extends State<SearchPage>
       return EmptyState(
         icon: Icons.search_off,
         title: '没有找到「${store.query}」',
-        subtitle: store.multiSource
-            ? '换个关键词，或在上面取消「搜索全部源」只搜当前源。'
-            : '换个关键词，或开启「搜索全部源」扩大范围。',
+        subtitle: app.exactSearch
+            ? '「精确」只保留片名完全一致的影片，关掉它再试一次。'
+            : (store.multiSource
+                ? '换个关键词，或在上面取消「搜索全部源」只搜当前源。'
+                : '换个关键词，或开启「搜索全部源」扩大范围。'),
+      );
+    }
+
+    if (store.groupBySource && store.sourceHits.length > 1) {
+      return RefreshIndicator(
+        onRefresh: () => store.search(
+          keyword: store.query,
+          active: sourceStore.active,
+          all: sourceStore.enabledSources,
+          multiSource: store.multiSource,
+          exact: app.exactSearch,
+        ),
+        child: GroupedVodGrid(
+          hits: store.sourceHits,
+          canLoadMore: store.canLoadMore,
+          loadingMore: store.loading,
+          onLoadMore: () => store.loadMore(
+            active: sourceStore.active,
+            all: sourceStore.enabledSources,
+          ),
+          onTap: (SourceHit hit, int index) => AppRoutes.openDetail(
+            context,
+            item: hit.items[index],
+            source: hit.source,
+          ),
+        ),
       );
     }
 
@@ -253,6 +302,7 @@ class _SearchPageState extends State<SearchPage>
         active: sourceStore.active,
         all: sourceStore.enabledSources,
         multiSource: store.multiSource,
+        exact: app.exactSearch,
       ),
       child: VodGrid(
         items: store.items,

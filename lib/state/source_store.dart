@@ -197,6 +197,29 @@ class SourceStore extends ChangeNotifier {
     _emit();
   }
 
+  /// 把一批源停用（订阅里已经下线的源）。
+  ///
+  /// 刻意不删：订阅地址由别人维护，某个站掉出列表很常见，但用户可能正靠它
+  /// 追剧。停用后它不再参与聚合搜索与首页，也不会挡着其它源，同时保留在
+  /// 列表里，用户可以自己决定删还是留。
+  ///
+  /// 返回实际被停用的条数。
+  Future<int> disableMissing(List<String> ids) async {
+    if (ids.isEmpty) return 0;
+    final Set<String> set = ids.toSet();
+    int changed = 0;
+    for (int i = 0; i < _sources.length; i++) {
+      if (!set.contains(_sources[i].id) || !_sources[i].enabled) continue;
+      _sources[i] = _sources[i].copyWith(enabled: false);
+      changed++;
+    }
+    if (changed == 0) return 0;
+    await _persist();
+    _ensureActive();
+    _emit();
+    return changed;
+  }
+
   Future<void> move(int oldIndex, int newIndex) async {
     if (oldIndex == newIndex) return;
     if (oldIndex < 0 || oldIndex >= _sources.length) return;

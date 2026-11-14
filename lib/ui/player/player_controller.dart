@@ -40,7 +40,10 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
         _sources = sources,
         _task = task {
     _player = environment.createPlayer();
-    _rate = app.defaultRate;
+    // 先看上次用的倍速与画面比例：用户调过一次就该沿用，
+    // 「默认倍速」只是没记过时的起点。
+    _rate = app.lastRate > 0 ? app.lastRate : app.defaultRate;
+    _fit = _fitFromCode(app.lastFit);
     // 标记是同步读的，先让存储开始加载；真到了还没有的时候回落到播放记录。
     unawaited(ShowMarksStore.instance.ensureLoaded());
     _bindStreams();
@@ -340,6 +343,19 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     return (_seekTarget.inMilliseconds / _duration.inMilliseconds)
         .clamp(0.0, 1.0);
   }
+
+  /// 画面比例的持久化编码。
+  static String _fitCode(BoxFit fit) => switch (fit) {
+        BoxFit.cover => 'cover',
+        BoxFit.fill => 'fill',
+        _ => 'contain',
+      };
+
+  static BoxFit _fitFromCode(String code) => switch (code) {
+        'cover' => BoxFit.cover,
+        'fill' => BoxFit.fill,
+        _ => BoxFit.contain,
+      };
 
   @override
   String get fitLabel {
@@ -1103,6 +1119,8 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   @override
   Future<void> setRate(double value) async {
     _rate = value;
+    // 记下来，下次开播直接沿用；不 await，避免拖慢按钮反馈。
+    unawaited(_app.setLastRate(value));
     _emit();
     await _player.setRate(value);
   }
@@ -1143,6 +1161,7 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
       default:
         _fit = BoxFit.contain;
     }
+    unawaited(_app.setLastFit(_fitCode(_fit)));
     _emit();
   }
 

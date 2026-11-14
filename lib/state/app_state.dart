@@ -23,8 +23,21 @@ class AppState extends ChangeNotifier {
 
   Future<void> setDefaultRate(double v) async {
     await _settings.setDefaultRate(v);
+    // 用户明确挑了默认倍速，就让它成为「下次开播用的倍速」，
+    // 否则会被上一部片记忆的倍速盖掉，看起来像设置没生效。
+    await _settings.setLastRate(v);
     notifyListeners();
   }
+
+  /// 上次播放用的倍速（0 表示没记过）。
+  double get lastRate => _settings.lastRate;
+
+  Future<void> setLastRate(double v) => _settings.setLastRate(v);
+
+  /// 上次播放用的画面比例。
+  String get lastFit => _settings.lastFit;
+
+  Future<void> setLastFit(String v) => _settings.setLastFit(v);
 
   bool get autoNextEpisode => _settings.autoNextEpisode;
 
@@ -65,6 +78,13 @@ class AppState extends ChangeNotifier {
 
   Future<void> setMultiSourceSearch(bool v) async {
     await _settings.setMultiSourceSearch(v);
+    notifyListeners();
+  }
+
+  bool get exactSearch => _settings.exactSearch;
+
+  Future<void> setExactSearch(bool v) async {
+    await _settings.setExactSearch(v);
     notifyListeners();
   }
 

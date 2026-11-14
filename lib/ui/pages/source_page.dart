@@ -13,6 +13,7 @@ import '../../state/source_health_store.dart';
 import '../../state/source_store.dart';
 import '../actions.dart';
 import '../widgets/empty_state.dart';
+import 'subscriptions_page.dart';
 
 /// 资源站管理页。
 class SourcePage extends StatefulWidget {
@@ -80,6 +81,10 @@ class _SourcePageState extends State<SourcePage> {
               const PopupMenuItem<String>(
                 value: 'test_all',
                 child: Text('测试全部连通性'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'subscriptions',
+                child: Text('订阅源…'),
               ),
               const PopupMenuItem<String>(value: 'export', child: Text('导出为 JSON')),
               const PopupMenuItem<String>(
@@ -292,6 +297,11 @@ class _SourcePageState extends State<SourcePage> {
         });
         AppActions.snack(
             context, '通过 ${ok.length}/${store.enabledSources.length} 个源');
+        break;
+      case 'subscriptions':
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(builder: (_) => const SubscriptionsPage()),
+        );
         break;
       case 'export':
         await _export(context, store);

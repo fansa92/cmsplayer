@@ -60,6 +60,23 @@ class SettingsStore {
     await _prefs?.setDouble(K.prefDefaultRate, v);
   }
 
+  /// 上次播放用的倍速。0 表示还没记过，回落到 [defaultRate]。
+  double get lastRate {
+    final double v = _prefs?.getDouble(K.prefLastRate) ?? 0;
+    return v > 0 ? v : 0;
+  }
+
+  Future<void> setLastRate(double v) async {
+    await _prefs?.setDouble(K.prefLastRate, v);
+  }
+
+  /// 上次播放用的画面比例：`contain` / `cover` / `fill`。
+  String get lastFit => _prefs?.getString(K.prefLastFit) ?? '';
+
+  Future<void> setLastFit(String v) async {
+    await _prefs?.setString(K.prefLastFit, v);
+  }
+
   bool get autoNextEpisode => _prefs?.getBool(K.prefAutoNext) ?? true;
 
   Future<void> setAutoNextEpisode(bool v) async {
@@ -96,6 +113,13 @@ class SettingsStore {
 
   Future<void> setMultiSourceSearch(bool v) async {
     await _prefs?.setBool(K.prefMultiSourceSearch, v);
+  }
+
+  /// 搜索是否只保留片名完全一致的结果（默认关）。
+  bool get exactSearch => _prefs?.getBool(K.prefExactSearch) ?? false;
+
+  Future<void> setExactSearch(bool v) async {
+    await _prefs?.setBool(K.prefExactSearch, v);
   }
 
   /// 选集列表是否倒序显示（默认正序）。
@@ -204,6 +228,7 @@ class SettingsStore {
         'showControlsOnStart': showControlsOnStart,
         'hardwareDecode': hardwareDecode,
         'multiSourceSearch': multiSourceSearch,
+        'exactSearch': exactSearch,
         'episodeOrderReverse': episodeOrderReverse,
         'autoSkipIntro': autoSkipIntro,
         'autoSkipOutro': autoSkipOutro,

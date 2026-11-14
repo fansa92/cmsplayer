@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:charset/charset.dart';
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 
@@ -44,6 +45,7 @@ void main() {
     String name = '测试影片',
     String host = 'a.com',
     bool rememberMarks = true,
+    double? defaultRate,
   }) async {
     rig = FakePlayerRig();
     PlayerController.environment = rig.environment;
@@ -51,6 +53,7 @@ void main() {
     final SettingsStore settings = SettingsStore();
     await settings.init();
     await settings.setRememberSkipMarks(rememberMarks);
+    if (defaultRate != null) await settings.setDefaultRate(defaultRate);
 
     final AppState app = AppState(settings);
     final HistoryStore history = HistoryStore();
@@ -230,6 +233,29 @@ void main() {
       final bool ok = await c.loadSubtitleUrl('sub.srt');
       expect(ok, isFalse);
       expect(c.fallbackNotice, contains('链接不完整'));
+    });
+  });
+
+  group('倍速与画面比例记忆', () {
+    test('调过的倍速与比例在下次开播沿用', () async {
+      final PlayerController first = await mount();
+      await first.setRate(1.5);
+      await first.cycleFit();
+      expect(first.rate, 1.5);
+      // contain → cover
+      expect(first.fit, BoxFit.cover);
+      // setRate / cycleFit 里的落盘是 fire-and-forget，等一拍。
+      await rig.settle(4);
+
+      final PlayerController second = await mount();
+      expect(second.rate, 1.5);
+      expect(second.fit, BoxFit.cover);
+    });
+
+    test('没记过时回落到默认倍速', () async {
+      final PlayerController c = await mount(defaultRate: 1.25);
+      expect(c.rate, 1.25);
+      expect(c.fit, BoxFit.contain);
     });
   });
 

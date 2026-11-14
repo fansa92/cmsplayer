@@ -1,11 +1,23 @@
 import 'package:flutter/foundation.dart';
 
 import '../core/logger.dart';
+import '../core/utils/title_match.dart';
 import '../data/models/paged_result.dart';
 import '../data/models/vod_item.dart';
 import '../data/models/vod_source.dart';
 import '../data/repository/record_repository.dart';
 import '../data/repository/vod_repository.dart';
+
+/// 一个源在本轮搜索里命中了哪些条目。
+///
+/// 聚合视图只留"代表条目"，看不出哪个站收录得全；按源分组时要用原始的
+/// 逐源结果，所以另外存一份。
+class SourceHit {
+  const SourceHit({required this.source, required this.items});
+
+  final VodSource source;
+  final List<VodItem> items;
+}
 
 /// 搜索状态。支持单源搜索与多源并发搜索。
 class SearchStore extends ChangeNotifier {
@@ -24,6 +36,16 @@ class SearchStore extends ChangeNotifier {
   List<String> _history = <String>[];
   List<String> _suggestions = <String>[];
 
+  /// 每个源本轮命中的原始条目（按源分组用）。
+  final Map<String, List<VodItem>> _bySource = <String, List<VodItem>>{};
+  final Map<String, VodSource> _sourceById = <String, VodSource>{};
+
+  /// 是否只保留片名完全一致的结果。
+  bool _exact = false;
+
+  /// 结果是否按源分组展示。
+  bool _groupBySource = false;
+
   /// 最近一次联想请求的令牌，防止慢回来的旧结果盖掉新输入的结果。
   String _suggestToken = '';
   bool _historyLoaded = false;
@@ -40,6 +62,24 @@ class SearchStore extends ChangeNotifier {
   bool get hasResult => _items.isNotEmpty;
   List<String> get history => _history;
   List<String> get suggestions => _suggestions;
+  bool get exact => _exact;
+  bool get groupBySource => _groupBySource;
+
+  /// 逐源命中的结果，条数多的排前面。
+  List<SourceHit> get sourceHits {
+    final List<SourceHit> hits = <SourceHit>[];
+    _bySource.forEach((String id, List<VodItem> items) {
+      final VodSource? source = _sourceById[id];
+      if (source == null || items.isEmpty) return;
+      hits.add(SourceHit(source: source, items: List<VodItem>.unmodifiable(items)));
+    });
+    hits.sort((SourceHit a, SourceHit b) {
+      final int byCount = b.items.length.compareTo(a.items.length);
+      if (byCount != 0) return byCount;
+      return a.source.name.compareTo(b.source.name);
+    });
+    return hits;
+  }
 
   /// 结果条目所属的源（多源搜索时用于展示来源标签）。
   ///
@@ -99,10 +139,24 @@ class SearchStore extends ChangeNotifier {
     _emit();
   }
 
+  void setExact(bool value) {
+    if (_exact == value) return;
+    _exact = value;
+    _emit();
+  }
+
+  void setGroupBySource(bool value) {
+    if (_groupBySource == value) return;
+    _groupBySource = value;
+    _emit();
+  }
+
   void clearResult() {
     _query = '';
     _items = <VodItem>[];
     _groupSources.clear();
+    _bySource.clear();
+    _sourceById.clear();
     _suggestions = <String>[];
     _suggestToken = '';
     _error = null;
@@ -180,6 +234,7 @@ class SearchStore extends ChangeNotifier {
     required VodSource? active,
     required List<VodSource> all,
     bool multiSource = false,
+    bool exact = false,
     int pageNo = 1,
   }) async {
     final String q = keyword.trim();
@@ -192,6 +247,7 @@ class SearchStore extends ChangeNotifier {
 
     _query = q;
     _multiSource = multiSource;
+    _exact = exact;
     _loading = true;
     _error = null;
     // 已经按回车搜索了，联想条就该收起来；同时让在途的联想请求失效。
@@ -200,6 +256,8 @@ class SearchStore extends ChangeNotifier {
     if (pageNo <= 1) {
       _items = <VodItem>[];
       _groupSources.clear();
+      _bySource.clear();
+      _sourceById.clear();
     }
     _emit();
 
@@ -230,6 +288,7 @@ class SearchStore extends ChangeNotifier {
       active: active,
       all: all,
       multiSource: _multiSource,
+      exact: _exact,
       pageNo: _pageNo + 1,
     );
   }
@@ -246,7 +305,7 @@ class SearchStore extends ChangeNotifier {
       detail: true,
       force: pageNo <= 1,
     );
-    _mergeIncoming(page.items, source);
+    _mergeIncoming(page.items, source, exact: _exact, query: q);
     _pageNo = page.page;
     _pageCount = page.pageCount;
   }
@@ -276,7 +335,7 @@ class SearchStore extends ChangeNotifier {
     for (int i = 0; i < pages.length; i++) {
       final VodPage page = pages[i];
       if (page.pageCount > maxPage) maxPage = page.pageCount;
-      _mergeIncoming(page.items, sources[i]);
+      _mergeIncoming(page.items, sources[i], exact: _exact, query: q);
     }
 
     _pageNo = pageNo;
@@ -288,12 +347,22 @@ class SearchStore extends ChangeNotifier {
   /// 原来的键是 `id|name`，而同一部片在不同资源站的 id 完全不同，多源搜索
   /// 时一部片会并排出现三四条。现在同名的只留一条，并把命中的源记下来，
   /// 界面上标「共 N 个源」。
-  void _mergeIncoming(List<VodItem> incoming, VodSource source) {
+  void _mergeIncoming(
+    List<VodItem> incoming,
+    VodSource source, {
+    required bool exact,
+    required String query,
+  }) {
     final Map<String, int> index = <String, int>{
       for (int i = 0; i < _items.length; i++) _groupKey(_items[i]): i,
     };
+    final String wanted = normalizeTitle(query);
 
     for (final VodItem item in incoming) {
+      // 精确模式：片名归一化后必须完全相等才算命中。
+      // 资源站的 `wd` 是模糊匹配，只靠它做不到"只要这一部"。
+      if (exact && normalizeTitle(item.name) != wanted) continue;
+      _record(source, item);
       final String key = _groupKey(item);
       final int? at = index[key];
       if (at == null) {
@@ -318,6 +387,19 @@ class SearchStore extends ChangeNotifier {
         owners.removeWhere((VodSource e) => e.id == source.id);
         owners.insert(0, source);
       }
+    }
+  }
+
+  /// 记一条逐源结果，按条目 ID 去重（翻页时同一条可能再回来）。
+  void _record(VodSource source, VodItem item) {
+    _sourceById[source.id] = source;
+    final List<VodItem> list =
+        _bySource.putIfAbsent(source.id, () => <VodItem>[]);
+    final int at = list.indexWhere((VodItem e) => e.id == item.id);
+    if (at >= 0) {
+      list[at] = item;
+    } else {
+      list.add(item);
     }
   }
 

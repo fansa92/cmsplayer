@@ -9,6 +9,7 @@ import 'pages/rank_page.dart';
 import 'pages/source_compare_page.dart';
 import 'pages/source_page.dart';
 import 'pages/stats_page.dart';
+import 'pages/subscriptions_page.dart';
 import 'pages/updates_page.dart';
 import 'player/player_page.dart';
 
@@ -48,6 +49,13 @@ class AppRoutes {
       MaterialPageRoute<void>(
         builder: (_) => SourcePage(asHome: asHome),
       ),
+    );
+  }
+
+  /// 订阅管理：一个地址维护一批资源站。
+  static Future<void> openSubscriptions(BuildContext context) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const SubscriptionsPage()),
     );
   }
 

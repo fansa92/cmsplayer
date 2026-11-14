@@ -3,11 +3,15 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'app.dart';
+import 'core/deep_link.dart';
 import 'core/storage/app_dirs.dart';
 import 'core/storage/settings_store.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 命令行 / 协议唤起带来的导入请求：先记下，等外壳挂载后再处理。
+  DeepLink.handleArgs(args);
 
   // media_kit 原生库必须在使用前初始化，且必须在 runApp 之前调用。
   MediaKit.ensureInitialized();
