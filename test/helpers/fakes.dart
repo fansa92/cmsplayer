@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:cms_player/core/storage/json_store.dart';
+import 'package:cms_player/core/storage/show_marks_store.dart';
 import 'package:cms_player/data/api/maccms_api.dart';
 import 'package:cms_player/data/models/vod_source.dart';
 import 'package:cms_player/data/repository/vod_repository.dart';
@@ -151,6 +152,7 @@ void useIsolatedStores() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     VodRepository.instance.clearAll();
     MacCmsApi.resetCompatForTest();
+    ShowMarksStore.instance.resetForTest();
     await SyncTombstones.instance.clearAll();
   });
 
@@ -158,6 +160,7 @@ void useIsolatedStores() {
     VodRepository.resetApiFactory();
     VodRepository.instance.clearAll();
     SourceStore.resetPinger();
+    ShowMarksStore.instance.resetForTest();
     await SyncTombstones.instance.clearAll();
     JsonStore.overrideDirectory = null;
     // Windows 上刚写过的文件句柄不会立刻释放，直接递归删偶发

@@ -6,6 +6,7 @@ import 'app_shortcuts.dart';
 import 'lazy_indexed_stack.dart';
 import '../../data/models/vod_source.dart';
 import '../../state/browse_store.dart';
+import '../../state/favorites_store.dart';
 import '../../state/home_store.dart';
 import '../../state/search_store.dart';
 import '../../state/source_store.dart';
@@ -109,9 +110,19 @@ class _AppShellState extends State<AppShell> {
         _ => const HistoryPage(),
       };
 
+  /// 收藏页在导航里的序号。有更新时给它挂个角标。
+  static const int _favoritesIndex = 3;
+
+  Widget _navIcon(int index, IconData icon, int updated) {
+    final Widget child = Icon(icon);
+    if (index != _favoritesIndex || updated <= 0) return child;
+    return Badge(label: Text('$updated'), child: child);
+  }
+
   @override
   Widget build(BuildContext context) {
     final SourceStore sourceStore = context.watch<SourceStore>();
+    final int updated = context.watch<FavoritesStore>().updatedCount;
 
     if (sourceStore.loading) {
       return const Scaffold(body: PageLoading(label: '正在加载资源站…'));
@@ -181,11 +192,15 @@ class _AppShellState extends State<AppShell> {
                       extended: context.isExpanded,
                       minExtendedWidth: 132,
                       destinations: <NavigationRailDestination>[
-                        for (final _Destination d in _destinations)
+                        for (int i = 0; i < _destinations.length; i++)
                           NavigationRailDestination(
-                            icon: Icon(d.icon),
-                            selectedIcon: Icon(d.selectedIcon),
-                            label: Text(d.label),
+                            icon: _navIcon(i, _destinations[i].icon, updated),
+                            selectedIcon: _navIcon(
+                              i,
+                              _destinations[i].selectedIcon,
+                              updated,
+                            ),
+                            label: Text(_destinations[i].label),
                           ),
                       ],
                     ),
@@ -200,11 +215,15 @@ class _AppShellState extends State<AppShell> {
                   selectedIndex: _index,
                   onDestinationSelected: _select,
                   destinations: <NavigationDestination>[
-                    for (final _Destination d in _destinations)
+                    for (int i = 0; i < _destinations.length; i++)
                       NavigationDestination(
-                        icon: Icon(d.icon),
-                        selectedIcon: Icon(d.selectedIcon),
-                        label: d.label,
+                        icon: _navIcon(i, _destinations[i].icon, updated),
+                        selectedIcon: _navIcon(
+                          i,
+                          _destinations[i].selectedIcon,
+                          updated,
+                        ),
+                        label: _destinations[i].label,
                       ),
                   ],
                 ),

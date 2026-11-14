@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:volume_controller/volume_controller.dart';
@@ -23,6 +25,8 @@ class PlayerEnvironment {
     required this.resetBrightness,
     required this.now,
     required this.createTimer,
+    required this.fetchBytes,
+    required this.readFileBytes,
   });
 
   /// 创建播放内核。生产是 `Player()`；测试用
@@ -45,6 +49,12 @@ class PlayerEnvironment {
   /// 一次性定时器。测试里换成可手动触发的假定时器，避免 pending Timer。
   final Timer Function(Duration duration, void Function() callback) createTimer;
 
+  /// 拉取外挂字幕的原始字节（按响应头里的编码再解码）。
+  final Future<List<int>> Function(Uri uri) fetchBytes;
+
+  /// 读本地字幕文件。测试里可以换成内存实现，不碰磁盘。
+  final Future<List<int>> Function(String path) readFileBytes;
+
   /// 生产实现：全部走真实插件。
   static PlayerEnvironment production() => PlayerEnvironment(
         createPlayer: () => Player(),
@@ -57,5 +67,15 @@ class PlayerEnvironment {
             ScreenBrightness.instance.resetApplicationScreenBrightness(),
         now: () => DateTime.now(),
         createTimer: (Duration d, void Function() f) => Timer(d, f),
+        fetchBytes: (Uri uri) async {
+          final http.Response res = await http
+              .get(uri, headers: <String, String>{'Accept': '*/*'})
+              .timeout(const Duration(seconds: 20));
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            throw StateError('HTTP ${res.statusCode}');
+          }
+          return res.bodyBytes;
+        },
+        readFileBytes: (String path) => File(path).readAsBytes(),
       );
 }

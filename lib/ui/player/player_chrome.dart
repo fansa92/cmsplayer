@@ -19,17 +19,21 @@ class PlayerTopBar extends StatelessWidget {
     required this.onBack,
     required this.onToggleOrientation,
     required this.onToggleFullScreen,
+    required this.onToggleMini,
     required this.onInfo,
     required this.onEpisodes,
+    this.mini = false,
   });
 
   final String title;
   final String subtitle;
   final bool locked;
   final bool fullScreen;
+  final bool mini;
   final VoidCallback onBack;
   final VoidCallback onToggleOrientation;
   final VoidCallback onToggleFullScreen;
+  final VoidCallback onToggleMini;
   final VoidCallback onInfo;
   final VoidCallback onEpisodes;
 
@@ -38,6 +42,41 @@ class PlayerTopBar extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final bool isLandscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
+
+    // 迷你窗只有 420px 宽，塞不下整套按钮：只留标题和「还原」。
+    if (mini) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: <Color>[Colors.black87, Colors.transparent],
+          ),
+        ),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                subtitle.isEmpty ? title : '$title · $subtitle',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: Colors.white70,
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: '还原窗口',
+              color: Colors.white,
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.open_in_full, size: 18),
+              onPressed: onToggleMini,
+            ),
+          ],
+        ),
+      );
+    }
 
     return Container(
       padding: EdgeInsets.only(
@@ -97,6 +136,13 @@ class PlayerTopBar extends StatelessWidget {
                   ? Icons.stay_current_portrait
                   : Icons.stay_current_landscape),
               onPressed: onToggleOrientation,
+            ),
+          if (PlatformInfo.isDesktop)
+            IconButton(
+              tooltip: '迷你悬浮窗',
+              color: Colors.white,
+              icon: const Icon(Icons.picture_in_picture_alt_outlined),
+              onPressed: locked ? null : onToggleMini,
             ),
           if (PlatformInfo.isDesktop)
             IconButton(

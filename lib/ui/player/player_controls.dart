@@ -61,6 +61,7 @@ class _PlayerControlsState extends State<PlayerControls> {
       PlayerWindow.isFullScreen().then((bool v) {
         if (mounted) setState(() => _fullScreen = v);
       });
+      PlayerWindow.mini.addListener(_onMiniChanged);
     }
 
     // autofocus 在路由还没拿到焦点时可能落空，这里补一帧再请求一次。
@@ -73,12 +74,27 @@ class _PlayerControlsState extends State<PlayerControls> {
   void dispose() {
     _hideTimer?.cancel();
     _osdTimer?.cancel();
+    PlayerWindow.mini.removeListener(_onMiniChanged);
     _focusNode.dispose();
     super.dispose();
   }
 
+  void _onMiniChanged() {
+    if (!mounted) return;
+    if (PlayerWindow.miniActive) {
+      // 迷你窗下控制栏一直显示，否则 420px 的窗口里想还原还得先点一下。
+      _hideTimer?.cancel();
+      setState(() => _visible = true);
+    } else {
+      setState(() {});
+      _scheduleHide();
+    }
+  }
+
   void _scheduleHide() {
     _hideTimer?.cancel();
+    // 迷你窗里控制栏常驻：窗口只有 420px，藏起来就找不到「还原」了。
+    if (PlayerWindow.miniActive) return;
     _hideTimer = Timer(K.controlsHideDelay, () {
       if (!mounted) return;
       if (controller.seeking ||
@@ -124,6 +140,10 @@ class _PlayerControlsState extends State<PlayerControls> {
   }
 
   void _toggle() {
+    if (PlayerWindow.miniActive) {
+      if (!_visible) setState(() => _visible = true);
+      return;
+    }
     setState(() => _visible = !_visible);
     if (_visible) {
       _scheduleHide();
@@ -292,6 +312,11 @@ class _PlayerControlsState extends State<PlayerControls> {
     _show();
   }
 
+  Future<void> _toggleMini() async {
+    await PlayerWindow.toggleMini();
+    _show();
+  }
+
   /// 移动端横竖屏切换；桌面窗口有自己的尺寸控制，用不上这个。
   ///
   /// 只声明目标方向，系统转过去后 `MediaQuery` 会随之变化，按钮图标自己翻转。
@@ -392,9 +417,11 @@ class _PlayerControlsState extends State<PlayerControls> {
                   subtitle: controller.task.subtitle,
                   locked: locked,
                   fullScreen: _fullScreen,
+                  mini: PlayerWindow.miniActive,
                   onBack: widget.onBack,
                   onToggleOrientation: _toggleOrientation,
                   onToggleFullScreen: _toggleFullScreen,
+                  onToggleMini: _toggleMini,
                   onInfo: () {
                     _openInfoSheet();
                     _scheduleHide();
@@ -589,6 +616,17 @@ class _PlayerControlsState extends State<PlayerControls> {
                         ],
                         const SizedBox(width: 8),
                         PlayerPillButton(
+                          label: '字幕',
+                          icon: Icons.subtitles_outlined,
+                          active: controller.subtitleActive,
+                          tooltip: '字幕与内嵌轨切换',
+                          onTap: () {
+                            _openSubtitleSheet();
+                            _scheduleHide();
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        PlayerPillButton(
                           label: _sleepLabel,
                           icon: Icons.bedtime_outlined,
                           active: controller.sleepRemaining != null ||
@@ -709,6 +747,10 @@ class _PlayerControlsState extends State<PlayerControls> {
 
   void _openTrackSheet() {
     showTrackSheet(context, controller);
+  }
+
+  void _openSubtitleSheet() {
+    showSubtitleSheet(context, controller);
   }
 
   void _openSleepSheet() {

@@ -119,6 +119,14 @@ class SettingsStore {
     await _prefs?.setBool(K.prefAutoSkipOutro, v);
   }
 
+  /// 按片名记住手动标的片头片尾（换源、清历史后仍然生效）。
+  bool get rememberSkipMarks =>
+      _prefs?.getBool(K.prefRememberSkipMarks) ?? true;
+
+  Future<void> setRememberSkipMarks(bool v) async {
+    await _prefs?.setBool(K.prefRememberSkipMarks, v);
+  }
+
   // ---------------- 同步 ----------------
   //
   // WebDAV 密码按明文存在应用配置里。这个应用不联网上送任何用户数据，
@@ -199,5 +207,6 @@ class SettingsStore {
         'episodeOrderReverse': episodeOrderReverse,
         'autoSkipIntro': autoSkipIntro,
         'autoSkipOutro': autoSkipOutro,
+        'rememberSkipMarks': rememberSkipMarks,
       };
 }

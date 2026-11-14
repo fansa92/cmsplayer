@@ -622,6 +622,34 @@ class FakeBinding extends ChangeNotifier implements PlayerControlsBinding {
   String? audioId;
 
   @override
+  List<PlayerSubtitleTrack> subtitleTracks = const <PlayerSubtitleTrack>[];
+
+  @override
+  String subtitleId = 'no';
+
+  @override
+  bool get subtitleActive => subtitleId != 'no';
+
+  @override
+  Future<void> selectSubtitleTrack(String id) async {
+    calls.add('selectSubtitleTrack:$id');
+    subtitleId = id;
+    notifyListeners();
+  }
+
+  @override
+  Future<bool> loadSubtitleUrl(String url) async {
+    calls.add('loadSubtitleUrl:$url');
+    return true;
+  }
+
+  @override
+  Future<bool> loadSubtitlePath(String path) async {
+    calls.add('loadSubtitlePath:$path');
+    return true;
+  }
+
+  @override
   bool canSwitchSource = false;
 
   /// findAlternateSources 的返回值，用例里按需塞候选。

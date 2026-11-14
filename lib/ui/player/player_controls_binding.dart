@@ -23,8 +23,32 @@ class PlayerAudioTrack {
   final String codec;
 }
 
-/// 一条可手动切换的跨源候选。
+/// 一条可选字幕轨。
 ///
+/// 内嵌轨与外挂轨用同一个模型；[external] 只影响界面上的标注。
+@immutable
+class PlayerSubtitleTrack {
+  const PlayerSubtitleTrack({
+    required this.id,
+    required this.label,
+    this.language = '',
+    this.codec = '',
+    this.external = false,
+  });
+
+  final String id;
+
+  /// 人可读的名字（容器里的标题 / 语言 / 序号 / 文件名）。
+  final String label;
+
+  final String language;
+  final String codec;
+
+  /// 是否是用户自己加载的外挂字幕。
+  final bool external;
+}
+
+/// 一条可手动切换的跨源候选。
 /// 与音轨同理，这里只暴露界面要用的三个字段，把 [SourceFallback] 那套
 /// 定位信息留在状态层，弹层不需要知道线路下标是怎么算出来的。
 @immutable
@@ -90,6 +114,25 @@ abstract class PlayerControlsBinding implements Listenable {
 
   /// 当前音轨 id，未知时为 null。
   String? get audioId;
+
+  // ---------------------------------------------------------------- 字幕
+  /// 可切换的字幕轨（内嵌 + 外挂）。没有任何字幕时为空。
+  List<PlayerSubtitleTrack> get subtitleTracks;
+
+  /// 当前字幕 id。`no` 表示关闭，`ext` 表示外挂，其余是内嵌轨。
+  String get subtitleId;
+
+  /// 是否有字幕在显示。
+  bool get subtitleActive => subtitleId != 'no';
+
+  /// 切换到某条字幕轨，传 `no` 关闭。
+  Future<void> selectSubtitleTrack(String id);
+
+  /// 从链接加载外挂字幕（SRT / ASS / VTT）。返回是否成功。
+  Future<bool> loadSubtitleUrl(String url);
+
+  /// 从本地路径加载外挂字幕。返回是否成功。
+  Future<bool> loadSubtitlePath(String path);
 
   // ---------------------------------------------------------------- 换源
   /// 是否还有别的已启用资源站可换。只有一个源时控制层不显示入口。

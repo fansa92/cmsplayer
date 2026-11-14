@@ -50,6 +50,7 @@ class FakePlatformPlayer extends PlatformPlayer {
   final List<Duration> seeks = <Duration>[];
   final List<double> rates = <double>[];
   final List<String> audioTrackIds = <String>[];
+  final List<SubtitleTrack> subtitleTracks = <SubtitleTrack>[];
   int playOrPauseCalls = 0;
   int pauseCalls = 0;
   bool disposed = false;
@@ -69,6 +70,11 @@ class FakePlatformPlayer extends PlatformPlayer {
   @override
   Future<void> setAudioTrack(AudioTrack track) async {
     audioTrackIds.add(track.id);
+  }
+
+  @override
+  Future<void> setSubtitleTrack(SubtitleTrack track) async {
+    subtitleTracks.add(track);
   }
 
   @override
@@ -132,6 +138,10 @@ class FakePlayerRig {
   int resetBrightnessCalls = 0;
   int disposedPlayers = 0;
 
+  /// 外挂字幕来源。用例里塞了才可用，默认模拟「下载失败」。
+  Future<List<int>> Function(Uri uri)? fetchSubtitleBytes;
+  Future<List<int>> Function(String path)? readSubtitleFile;
+
   final List<double> volumeWrites = <double>[];
   final List<double> brightnessWrites = <double>[];
   final List<FakeTimer> timers = <FakeTimer>[];
@@ -163,6 +173,16 @@ class FakePlayerRig {
       final FakeTimer timer = FakeTimer(d, f);
       timers.add(timer);
       return timer;
+    },
+    fetchBytes: (Uri uri) async {
+      final Future<List<int>> Function(Uri uri)? fn = fetchSubtitleBytes;
+      if (fn == null) throw StateError('no subtitle url in test');
+      return fn(uri);
+    },
+    readFileBytes: (String path) async {
+      final Future<List<int>> Function(String path)? fn = readSubtitleFile;
+      if (fn == null) throw StateError('no subtitle file in test');
+      return fn(path);
     },
   );
 

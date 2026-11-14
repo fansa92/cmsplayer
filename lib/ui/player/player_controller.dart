@@ -7,6 +7,8 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../core/constants.dart';
 import '../../core/logger.dart';
+import '../../core/storage/show_marks_store.dart';
+import '../../core/utils/encoding.dart';
 import '../../core/utils/text_utils.dart';
 import '../../data/models/play_line.dart';
 import '../../data/models/play_record.dart';
@@ -38,6 +40,8 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
         _task = task {
     _player = environment.createPlayer();
     _rate = app.defaultRate;
+    // 标记是同步读的，先让存储开始加载；真到了还没有的时候回落到播放记录。
+    unawaited(ShowMarksStore.instance.ensureLoaded());
     _bindStreams();
     _openCurrent();
   }
@@ -147,6 +151,23 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   final Map<String, AudioTrack> _audioById = <String, AudioTrack>{};
 
   String? _audioId;
+
+  // ---------------------------------------------------------------- 字幕
+
+  /// 可切换的字幕轨。内嵌轨用 `sub:<mpv id>` 作 key，外挂字幕固定 `ext`。
+  List<PlayerSubtitleTrack> _subtitleTracks = const <PlayerSubtitleTrack>[];
+
+  final Map<String, SubtitleTrack> _subtitleById = <String, SubtitleTrack>{};
+
+  /// 当前字幕 id，`no` 表示关闭。
+  String _subtitleId = 'no';
+
+  /// 最近一次从容器里拿到的原始字幕轨，外挂字幕重建列表时要用。
+  List<SubtitleTrack> _rawSubtitleTracks = const <SubtitleTrack>[];
+
+  /// 用户加载的外挂字幕。切集时 media_kit 会清掉轨，需要重新挂上去。
+  SubtitleTrack? _externalSubtitle;
+  String? _externalSubtitleLabel;
 
   /// 长按临时倍速前的倍速，null 表示当前没有处于临时提速。
   double? _burstFrom;
@@ -504,16 +525,38 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
       _audioChannels = a?.channels ?? _channelsOf(a) ?? _audioChannels;
       _audioSampleRate = a?.samplerate ?? _audioSampleRate;
       _syncAudioTracks(audio);
+      _syncSubtitleTracks(ts.subtitle);
       _emit();
     }));
     // 当前生效的轨。用户切换音轨、或者播放器自己挑了一条之后都会推一次，
     // 用它保持「弹层里打勾的那条」和实际播放的一致。
     _subs.add(_player.stream.track.listen((Track t) {
       final AudioTrack a = t.audio;
-      if (a.id == 'auto' || a.id == 'no') return;
-      if (_audioId == a.id) return;
-      _audioId = a.id;
-      _emit();
+      bool changed = false;
+      if (a.id != 'auto' && a.id != 'no' && _audioId != a.id) {
+        _audioId = a.id;
+        changed = true;
+      }
+      // 字幕：media_kit 会自己挑一条默认字幕，界面上要同步过去。
+      final SubtitleTrack s = t.subtitle;
+      if (s.data) {
+        if (_subtitleId != 'ext') {
+          _subtitleId = 'ext';
+          changed = true;
+        }
+      } else if (s.id == 'no') {
+        if (_subtitleId != 'no') {
+          _subtitleId = 'no';
+          changed = true;
+        }
+      } else if (s.id != 'auto' && !s.uri) {
+        final String key = 'sub:${s.id}';
+        if (_subtitleById.containsKey(key) && _subtitleId != key) {
+          _subtitleId = key;
+          changed = true;
+        }
+      }
+      if (changed) _emit();
     }));
     _subs.add(_player.stream.videoParams.listen((VideoParams p) {
       _pixelFormat = p.pixelformat;
@@ -582,6 +625,170 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     final int? n = t?.channelscount;
     if (n == null || n <= 0) return null;
     return '$n';
+  }
+
+  // ---------------------------------------------------------------- 字幕
+
+  @override
+  List<PlayerSubtitleTrack> get subtitleTracks => _subtitleTracks;
+
+  @override
+  String get subtitleId => _subtitleId;
+
+  @override
+  bool get subtitleActive => _subtitleId != 'no';
+
+  /// 字幕显示名：标题 → 语言 → 序号。
+  static String _subtitleLabel(SubtitleTrack t, int index) {
+    final String title = (t.title ?? '').trim();
+    if (title.isNotEmpty) return title;
+    final String lang = (t.language ?? '').trim();
+    if (lang.isNotEmpty) return lang;
+    return '字幕 ${index + 1}';
+  }
+
+  void _syncSubtitleTracks(List<SubtitleTrack> raw) {
+    _rawSubtitleTracks = raw;
+    _subtitleById.clear();
+    final List<PlayerSubtitleTrack> list = <PlayerSubtitleTrack>[];
+    for (int i = 0; i < raw.length; i++) {
+      final SubtitleTrack t = raw[i];
+      // auto / no 是占位轨；外挂轨单独由 _externalSubtitle 维护，不重复列。
+      if (t.id == 'auto' || t.id == 'no' || t.uri || t.data) continue;
+      final String key = 'sub:${t.id}';
+      _subtitleById[key] = t;
+      list.add(PlayerSubtitleTrack(
+        id: key,
+        label: _subtitleLabel(t, i),
+        language: t.language ?? '',
+        codec: t.codec ?? '',
+      ));
+    }
+    final SubtitleTrack? ext = _externalSubtitle;
+    if (ext != null) {
+      _subtitleById['ext'] = ext;
+      list.add(PlayerSubtitleTrack(
+        id: 'ext',
+        label: _externalSubtitleLabel ?? '外挂字幕',
+        external: true,
+      ));
+    }
+    _subtitleTracks = list;
+    // 选中的轨可能随着切集消失了，落回「关闭」。
+    if (_subtitleId != 'no' && !_subtitleById.containsKey(_subtitleId)) {
+      _subtitleId = 'no';
+    }
+  }
+
+  @override
+  Future<void> selectSubtitleTrack(String id) async {
+    if (id == _subtitleId) return;
+    if (id == 'no') {
+      _subtitleId = 'no';
+      _emit();
+      try {
+        await _player.setSubtitleTrack(SubtitleTrack.no());
+      } on Object catch (e) {
+        AppLog.e('Player', 'disable subtitle failed: $e');
+      }
+      return;
+    }
+    final SubtitleTrack? track = _subtitleById[id];
+    if (track == null) return;
+    _subtitleId = id;
+    _emit();
+    try {
+      await _player.setSubtitleTrack(track);
+    } on Object catch (e) {
+      AppLog.e('Player', 'setSubtitleTrack failed: $e');
+    }
+  }
+
+  @override
+  Future<bool> loadSubtitleUrl(String url) async {
+    final String text = url.trim();
+    if (text.isEmpty) return false;
+    final Uri? uri = Uri.tryParse(text);
+    if (uri == null || !uri.hasScheme) {
+      _setNotice('字幕链接不完整');
+      return false;
+    }
+    try {
+      final List<int> bytes = await environment.fetchBytes(uri);
+      final String decoded = ResponseDecoder.decode(bytes);
+      final String label =
+          uri.pathSegments.isEmpty ? '外挂字幕' : uri.pathSegments.last;
+      return await _adoptExternalSubtitle(decoded, label: label);
+    } on Object catch (e) {
+      AppLog.e('Player', 'load subtitle url failed: $e');
+      _setNotice('字幕加载失败');
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> loadSubtitlePath(String path) async {
+    final String text = path.trim();
+    if (text.isEmpty) return false;
+    try {
+      final List<int> bytes = await environment.readFileBytes(text);
+      final String decoded = ResponseDecoder.decode(bytes);
+      final String label = text.split(RegExp(r'[\\/]')).last;
+      return await _adoptExternalSubtitle(decoded, label: label);
+    } on Object catch (e) {
+      AppLog.e('Player', 'load subtitle file failed: $e');
+      _setNotice('找不到这个字幕文件');
+      return false;
+    }
+  }
+
+  /// 粗略判断是不是字幕文本。mpv 对格式不对的文件只报一个错，
+  /// 不如加载前先拦住，提示也更准确。
+  static bool _looksLikeSubtitle(String text) {
+    if (text.trim().isEmpty) return false;
+    final String lower = text.toLowerCase();
+    return text.contains('-->') ||
+        lower.contains('webvtt') ||
+        lower.contains('[script info]') ||
+        lower.contains('dialogue:');
+  }
+
+  Future<bool> _adoptExternalSubtitle(
+    String text, {
+    required String label,
+  }) async {
+    if (!_looksLikeSubtitle(text)) {
+      _setNotice('这不是可识别的字幕文件');
+      return false;
+    }
+    final String name = label.trim().isEmpty ? '外挂字幕' : label.trim();
+    final SubtitleTrack track = SubtitleTrack.data(text, title: name);
+    _externalSubtitle = track;
+    _externalSubtitleLabel = name;
+    _subtitleId = 'ext';
+    _syncSubtitleTracks(_rawSubtitleTracks);
+    _emit();
+    try {
+      await _player.setSubtitleTrack(track);
+    } on Object catch (e) {
+      AppLog.e('Player', 'apply external subtitle failed: $e');
+      _setNotice('字幕加载失败');
+      return false;
+    }
+    _setNotice('已加载字幕：$name');
+    return true;
+  }
+
+  /// 切集后 media_kit 会丢掉外挂轨，这里重新挂一次。
+  Future<void> _reapplyExternalSubtitle() async {
+    final SubtitleTrack? track = _externalSubtitle;
+    if (track == null) return;
+    try {
+      await _player.setSubtitleTrack(track);
+      _subtitleId = 'ext';
+    } on Object catch (e) {
+      AppLog.d('Player', 'reapply subtitle failed: $e');
+    }
   }
 
   // ---------------------------------------------------------------- 打开
@@ -658,6 +865,8 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
         play: true,
       );
       await _player.setRate(_rate);
+      // 外挂字幕不随 open 保留，重新挂上去（没有就什么都不做）。
+      await _reapplyExternalSubtitle();
       // 正常情况下 playing / duration 流会立刻清掉 _starting；
       // 这里再挂一道兜底，防止流不触发时控制栏被永久遮住。
       _startupTimer?.cancel();
@@ -839,6 +1048,14 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   }
 
   void _loadSkipMarks() {
+    // 优先用按片名存的那份：同一部片换了资源站也认。
+    final ShowSkipMarks? saved =
+        ShowMarksStore.instance.find(_task.item.name);
+    if (saved != null) {
+      _introMs = saved.introMs;
+      _outroMs = saved.outroMs;
+      return;
+    }
     final PlayRecord? r = _history.byKey(_task.recordKey);
     _introMs = r?.introMs ?? 0;
     _outroMs = r?.outroMs ?? 0;
@@ -1099,6 +1316,22 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   }
 
   Future<void> _persistSkipMarks() async {
+    // 片名级存储：换源 / 清历史都还在。用户关掉「记住」就只写播放记录。
+    if (_app.rememberSkipMarks) {
+      try {
+        if (_introMs <= 0 && _outroMs <= 0) {
+          await ShowMarksStore.instance.clear(_task.item.name);
+        } else {
+          await ShowMarksStore.instance.save(
+            _task.item.name,
+            introMs: _introMs,
+            outroMs: _outroMs,
+          );
+        }
+      } on Object catch (e) {
+        AppLog.d('Player', 'save show marks failed: $e');
+      }
+    }
     final PlayRecord? existing = _history.byKey(_task.recordKey);
     if (existing != null) {
       await _history.upsert(

@@ -566,6 +566,176 @@ class _SourceSheetBodyState extends State<_SourceSheetBody> {
   }
 }
 
+/// 字幕选择与外挂字幕加载。
+///
+/// 内嵌轨直接列出来；外挂字幕给两个入口（链接 / 本地路径），拉取和解码都在
+/// 控制器里做，弹层只负责收集文本。没装文件选择器插件，桌面端粘绝对路径
+/// 一样能用，移动端更适合用链接。
+Future<void> showSubtitleSheet(
+  BuildContext context,
+  PlayerControlsBinding controller,
+) async {
+  final _SubtitleAction? action =
+      await showModalBottomSheet<_SubtitleAction>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (BuildContext ctx) => SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(ctx).height * 0.7,
+        ),
+        child: ListenableBuilder(
+          listenable: controller,
+          builder: (BuildContext ctx, _) => ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.only(bottom: 12),
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                child: Text(
+                  '字幕',
+                  style: Theme.of(ctx)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+              ListTile(
+                dense: true,
+                leading: Icon(
+                  controller.subtitleId == 'no'
+                      ? Icons.check
+                      : Icons.subtitles_off,
+                  size: 20,
+                ),
+                title: const Text('关闭字幕'),
+                onTap: () => Navigator.of(ctx).pop(
+                  const _SubtitleAction.pick('no'),
+                ),
+              ),
+              if (controller.subtitleTracks.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
+                  child: Text(
+                    '当前视频没有内嵌字幕，可以加载外挂字幕。',
+                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                )
+              else
+                for (final PlayerSubtitleTrack t in controller.subtitleTracks)
+                  ListTile(
+                    dense: true,
+                    leading: Icon(
+                      t.id == controller.subtitleId
+                          ? Icons.check
+                          : Icons.subtitles_outlined,
+                      size: 20,
+                    ),
+                    title: Text(t.label),
+                    subtitle: Text(
+                      t.external ? '外挂字幕' : '内嵌字幕',
+                    ),
+                    onTap: () => Navigator.of(ctx).pop(
+                      _SubtitleAction.pick(t.id),
+                    ),
+                  ),
+              const Divider(height: 1),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.link, size: 20),
+                title: const Text('从链接加载…'),
+                subtitle: const Text('SRT / ASS / WebVTT 的直链'),
+                onTap: () => Navigator.of(ctx).pop(
+                  const _SubtitleAction.loadUrl(),
+                ),
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.folder_open, size: 20),
+                title: const Text('从本地文件加载…'),
+                subtitle: const Text('粘贴字幕文件的完整路径'),
+                onTap: () => Navigator.of(ctx).pop(
+                  const _SubtitleAction.loadPath(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+
+  if (action == null) return;
+  if (action.pickId != null) {
+    await controller.selectSubtitleTrack(action.pickId!);
+    return;
+  }
+  if (!context.mounted) return;
+  final String? input = await _promptSubtitleSource(
+    context,
+    title: action.url ? '字幕链接' : '字幕文件路径',
+    hint: action.url ? 'https://example.com/sub.srt' : 'D:\\字幕\\sub.srt',
+    keyboardType: action.url ? TextInputType.url : TextInputType.text,
+  );
+  if (input == null || input.trim().isEmpty) return;
+  if (action.url) {
+    await controller.loadSubtitleUrl(input);
+  } else {
+    await controller.loadSubtitlePath(input);
+  }
+}
+
+/// 弹层选择结果：切轨，或走某个加载入口。
+class _SubtitleAction {
+  const _SubtitleAction.pick(this.pickId) : url = false;
+  const _SubtitleAction.loadUrl()
+      : pickId = null,
+        url = true;
+  const _SubtitleAction.loadPath()
+      : pickId = null,
+        url = false;
+
+  final String? pickId;
+  final bool url;
+}
+
+Future<String?> _promptSubtitleSource(
+  BuildContext context, {
+  required String title,
+  required String hint,
+  required TextInputType keyboardType,
+}) {
+  final TextEditingController input = TextEditingController();
+  return showDialog<String>(
+    context: context,
+    builder: (BuildContext ctx) => AlertDialog(
+      title: Text(title),
+      content: TextField(
+        controller: input,
+        autofocus: true,
+        keyboardType: keyboardType,
+        maxLines: 2,
+        minLines: 1,
+        decoration: InputDecoration(hintText: hint),
+        onSubmitted: (String v) => Navigator.of(ctx).pop(v.trim()),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(ctx).pop(input.text.trim()),
+          child: const Text('加载'),
+        ),
+      ],
+    ),
+  );
+}
+
 /// 片头片尾标记。
 ///
 /// 「设为当前」取的是**点下去那一刻**的进度，所以按钮在弹层里点、画面还在

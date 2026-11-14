@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -12,6 +14,7 @@ import '../../state/history_store.dart';
 import '../../state/source_store.dart';
 import 'player_controls.dart';
 import 'player_controller.dart';
+import 'player_window.dart';
 
 /// 全屏播放页。
 class PlayerPage extends StatefulWidget {
@@ -82,6 +85,8 @@ class _PlayerPageState extends State<PlayerPage> {
 
   @override
   void dispose() {
+    // 退播放页时窗口还停在 420px 的话，主界面会变成一个小窗，先还原。
+    if (PlayerWindow.miniActive) unawaited(PlayerWindow.setMini(false));
     // 先恢复系统 UI，再释放播放器（顺序反过来会在部分机型上闪一下状态栏）。
     _exitPlaybackUi();
     _controller.dispose();

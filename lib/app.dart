@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'core/constants.dart';
 import 'core/storage/settings_store.dart';
+import 'core/storage/show_marks_store.dart';
 import 'core/theme/app_theme.dart';
 import 'state/app_state.dart';
 import 'state/browse_store.dart';
@@ -61,6 +62,8 @@ class _CmsPlayerAppState extends State<CmsPlayerApp> {
     await _sourceStore.load();
     await _favoritesStore.load();
     await _historyStore.load();
+    // 片头片尾标记：播放器读它是同步的，启动时先加载好。
+    await ShowMarksStore.instance.ensureLoaded();
     // 同步配置只是读几个字符串，不值得塞进上面的 await 链里拖慢启动；
     // 但要保证同步页第一次打开时它已经就绪。
     _syncStore.load();

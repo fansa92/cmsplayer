@@ -90,4 +90,12 @@ class AppState extends ChangeNotifier {
     await _settings.setAutoSkipOutro(v);
     notifyListeners();
   }
+
+  /// 按片名记住片头片尾。
+  bool get rememberSkipMarks => _settings.rememberSkipMarks;
+
+  Future<void> setRememberSkipMarks(bool v) async {
+    await _settings.setRememberSkipMarks(v);
+    notifyListeners();
+  }
 }

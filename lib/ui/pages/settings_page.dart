@@ -179,6 +179,13 @@ class _SettingsPageState extends State<SettingsPage> {
             onChanged: (bool v) => app.setAutoSkipOutro(v),
           ),
           SwitchListTile(
+            secondary: const Icon(Icons.bookmark_added_outlined),
+            title: const Text('按片名记住片头片尾'),
+            subtitle: const Text('换资源站或清空历史后，标记仍然生效'),
+            value: app.rememberSkipMarks,
+            onChanged: (bool v) => app.setRememberSkipMarks(v),
+          ),
+          SwitchListTile(
             secondary: const Icon(Icons.lightbulb_outline),
             title: const Text('播放时保持屏幕常亮'),
             value: app.keepScreenOn,

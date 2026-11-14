@@ -7,6 +7,7 @@ import 'pages/detail_page.dart';
 import 'pages/keyword_page.dart';
 import 'pages/rank_page.dart';
 import 'pages/source_page.dart';
+import 'pages/updates_page.dart';
 import 'player/player_page.dart';
 
 /// 页面跳转集中在这里，方便统一改动画 / 传参。
@@ -51,6 +52,13 @@ class AppRoutes {
   static Future<void> openRank(BuildContext context) {
     return Navigator.of(context).push<void>(
       MaterialPageRoute<void>(builder: (_) => const RankPage()),
+    );
+  }
+
+  /// 追剧更新中心：收藏里哪些出了新集。
+  static Future<void> openUpdates(BuildContext context) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const UpdatesPage()),
     );
   }
 

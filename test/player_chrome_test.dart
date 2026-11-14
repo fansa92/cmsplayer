@@ -21,15 +21,19 @@ void main() {
     VoidCallback? onInfo,
     VoidCallback? onEpisodes,
     VoidCallback? onFullScreen,
+    VoidCallback? onMini,
+    bool mini = false,
   }) {
     return PlayerTopBar(
       title: '庆余年',
       subtitle: subtitle,
       locked: locked,
       fullScreen: fullScreen,
+      mini: mini,
       onBack: onBack ?? () {},
       onToggleOrientation: () {},
       onToggleFullScreen: onFullScreen ?? () {},
+      onToggleMini: onMini ?? () {},
       onInfo: onInfo ?? () {},
       onEpisodes: onEpisodes ?? () {},
     );
@@ -69,6 +73,22 @@ void main() {
 
       expect(find.byTooltip('退出全屏 (Esc)'), findsOneWidget);
       expect(find.byIcon(Icons.fullscreen_exit), findsOneWidget);
+    });
+
+    testWidgets('迷你窗只留标题与还原按钮', (WidgetTester tester) async {
+      int restores = 0;
+      await tester.pumpWidget(host(topBar(
+        mini: true,
+        onMini: () => restores++,
+      )));
+
+      expect(find.text('庆余年 · m3u8 · 第01集'), findsOneWidget);
+      expect(find.byTooltip('还原窗口'), findsOneWidget);
+      expect(find.byTooltip('选集'), findsNothing);
+      expect(find.byTooltip('返回'), findsNothing);
+
+      await tester.tap(find.byTooltip('还原窗口'));
+      expect(restores, 1);
     });
 
     testWidgets('锁定时禁用全屏并收起信息/选集，返回键仍可用', (WidgetTester tester) async {

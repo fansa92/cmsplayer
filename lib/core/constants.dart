@@ -87,12 +87,19 @@ class K {
   /// 降级提示在界面上停留的时长。
   static const Duration fallbackNoticeDuration = Duration(seconds: 4);
 
+  /// 桌面迷你窗的初始尺寸。
+  static const double miniWindowWidth = 420;
+  static const double miniWindowHeight = 236;
+
   // ---------------- 存储 ----------------
   static const String boxSources = 'sources.json';
   static const String boxFavorites = 'favorites.json';
   static const String boxHistory = 'history.json';
   static const String boxSearches = 'searches.json';
   static const String boxSyncTombstones = 'sync_tombstones.json';
+
+  /// 按片名记住的片头片尾秒数。独立于播放记录：换源、清历史都还在。
+  static const String boxShowMarks = 'show_marks.json';
 
   static const String prefThemeMode = 'theme_mode';
   static const String prefActiveSource = 'active_source_id';
@@ -106,6 +113,7 @@ class K {
   static const String prefEpisodeOrder = 'episode_order';
   static const String prefAutoSkipIntro = 'auto_skip_intro';
   static const String prefAutoSkipOutro = 'auto_skip_outro';
+  static const String prefRememberSkipMarks = 'remember_skip_marks';
   static const String prefImageCacheBytes = 'image_cache_bytes';
 
   // ---------------- 同步 ----------------

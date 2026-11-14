@@ -7,6 +7,7 @@ import '../../data/models/vod_source.dart';
 import '../../state/favorites_store.dart';
 import '../../state/source_store.dart';
 import '../actions.dart';
+import '../navigation.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/vod_grid.dart';
 
@@ -86,6 +87,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
               sources: sourceStore.sources,
               force: true,
             ),
+            onUpdates: () => AppRoutes.openUpdates(context),
             onClear: () => _confirmClear(context, favorites, all.length),
           ),
           Expanded(
@@ -117,6 +119,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
             sources: sourceStore.sources,
             force: true,
           ),
+          onUpdates: () => AppRoutes.openUpdates(context),
           onClear: () => _confirmClear(context, favorites, all.length),
         ),
         Expanded(
@@ -215,6 +218,7 @@ class _Toolbar extends StatelessWidget {
     required this.onChanged,
     required this.onOnlyUpdated,
     required this.onCheck,
+    required this.onUpdates,
     required this.onClear,
   });
 
@@ -226,6 +230,7 @@ class _Toolbar extends StatelessWidget {
   final ValueChanged<bool> onChanged;
   final ValueChanged<bool> onOnlyUpdated;
   final VoidCallback onCheck;
+  final VoidCallback onUpdates;
   final VoidCallback onClear;
 
   @override
@@ -246,6 +251,17 @@ class _Toolbar extends StatelessWidget {
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
+                ),
+              ),
+              Badge(
+                isLabelVisible: updated > 0,
+                label: Text('$updated'),
+                child: IconButton(
+                  tooltip: '追剧更新',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onUpdates,
+                  icon: const Icon(Icons.notifications_active_outlined,
+                      size: 20),
                 ),
               ),
               IconButton(
