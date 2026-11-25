@@ -341,7 +341,7 @@ class _AddDialogState extends State<_AddDialog> {
           ),
           const SizedBox(height: 6),
           Text(
-            K.officialSourceListMirror,
+            K.officialSourceListUrl,
             style: theme.textTheme.labelSmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),

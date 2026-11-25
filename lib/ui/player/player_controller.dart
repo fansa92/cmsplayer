@@ -104,6 +104,9 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   /// 兜底定时器：网络卡死时也要把控制栏放出来，避免无限转圈。
   Timer? _startupTimer;
 
+  /// 播放中缓冲卡死的兜底定时器。
+  Timer? _stallTimer;
+
   double _rate = 1.0;
   double _volume = 100.0;
   bool _locked = false;
@@ -220,6 +223,13 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   /// 是否正在跑降级流程。防止两条流程互相抢降级链的位置。
   bool _recovering = false;
 
+  /// 降级期间收到的错误。降级结束后按发生时间决定是否重放。
+  String? _pendingFailure;
+  DateTime? _pendingFailureAt;
+
+  /// 最近一次发起 open 的时刻，用来判断暂存错误属于新旧哪个媒体。
+  DateTime _lastOpenAt = DateTime.fromMillisecondsSinceEpoch(0);
+
   /// 「正在尝试…」提示。
   String? _fallbackTrying;
 
@@ -261,8 +271,14 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
         .toList();
     if (candidates.isEmpty) return const <PlayerSourceOption>[];
 
-    final List<SourceFallback> found =
-        await FallbackResolver.crossSource(_task, candidates);
+    // 手动换源是用户主动发起的，放开自动降级的保守上限：
+    // 搜全部候选源、多给几个候选，让用户自己挑。
+    final List<SourceFallback> found = await FallbackResolver.crossSource(
+      _task,
+      candidates,
+      maxSearchSources: candidates.length,
+      maxResults: 10,
+    );
     if (_disposed) return const <PlayerSourceOption>[];
 
     final List<PlayerSourceOption> options = <PlayerSourceOption>[];
@@ -293,6 +309,8 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   /// 手动切到某个候选源。打开失败时照常走降级链，不会卡在一个黑屏上。
   @override
   Future<void> switchToSource(String sourceId) async {
+    // 自动降级 / 原地重试正在跑时不接手，避免两条流程互相覆盖任务。
+    if (_recovering || _retryingInPlace) return;
     final SourceFallback? target = _alternates[sourceId];
     if (target == null) return;
     if (target.source.id == _task.source.id) return;
@@ -502,6 +520,17 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     }));
     _subs.add(_player.stream.buffering.listen((bool b) {
       _buffering = b;
+      _stallTimer?.cancel();
+      _stallTimer = null;
+      // 播放中卡缓冲超过阈值：多半是网络挂起，mpv 未必会报 error，
+      // 这里主动原地重试，不让转圈永远转下去。
+      if (b && !_starting && _position > const Duration(seconds: 5)) {
+        _stallTimer = environment.createTimer(K.stallTimeout, () {
+          if (_disposed || !_buffering) return;
+          AppLog.d('Player', 'buffering stalled, retry in place');
+          _retryCurrentInPlace();
+        });
+      }
       _emit();
     }));
     _subs.add(_player.stream.completed.listen((bool c) {
@@ -520,7 +549,14 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     _subs.add(_player.stream.error.listen((String e) {
       AppLog.e('Player', 'media error: $e');
       if (_disposed) return;
-      // 不立刻报错：先沿降级链试一遍（备用地址 → 其它线路 → 换源），
+      // 已经播起来（有进度）后出错，多半是瞬时网络错误（分片超时、
+      // 网络抖动等），mpv 往往能自行恢复。这里原地重开当前地址并
+      // 续播，不走降级链，避免看着看着被自动换线路/换源。
+      if (!_starting && _position > const Duration(seconds: 5)) {
+        _retryCurrentInPlace();
+        return;
+      }
+      // 开播阶段出错：先沿降级链试一遍（备用地址 → 其它线路 → 换源），
       // 都试过了才把错误面板亮出来。
       unawaited(_handleFailure(e.isEmpty ? '播放失败' : e));
     }));
@@ -874,6 +910,8 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     _starting = true;
     _startupTimer?.cancel();
     _startupTimer = null;
+    _stallTimer?.cancel();
+    _stallTimer = null;
     _completed = false;
     _resumeApplied = false;
     _introHandled = false;
@@ -883,6 +921,7 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     _resetStreamInfo();
     _emit();
 
+    _lastOpenAt = environment.now();
     AppLog.d('Player', 'open $url');
     try {
       await _player.open(
@@ -914,6 +953,37 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
 
   // ---------------------------------------------------------------- 降级
 
+  /// 播放中出错时的原地重试：重开当前地址并跳回出错前的进度。
+  ///
+  /// 不切线路、不切源。重开后 [_position] 已归零，若同样的错误再次
+  /// 发生，会落回正常的降级链，不会在这里无限循环。
+  bool _retryingInPlace = false;
+
+  void _retryCurrentInPlace() {
+    if (_retryingInPlace || _recovering) return;
+    final PlayEpisode? episode = _task.episode;
+    if (episode == null) return;
+    final String? url = resolveRawUrl(episode.url);
+    if (url == null) return;
+    final Duration resumeAt = _position;
+    _retryingInPlace = true;
+    _setNotice('播放出错，正在重新加载…');
+    unawaited(() async {
+      try {
+        final bool opened = await _openUrl(url);
+        if (_disposed) return;
+        if (opened) {
+          await _player.seek(resumeAt);
+        } else {
+          // 重开都失败了，说明不是瞬时问题，交给降级链。
+          await _handleFailure(_error ?? '播放失败');
+        }
+      } finally {
+        _retryingInPlace = false;
+      }
+    }());
+  }
+
   /// 播放失败后的降级处理。
   ///
   /// 依次尝试：同源备用地址 → 同源其它线路 → 跨源同名影片。
@@ -922,30 +992,53 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   /// [_recovering] 保证同一时刻只有一条降级流程在跑：`_openUrl` 失败时
   /// 也会走这里，不加锁的话两条流程会互相抢降级链的位置。
   Future<void> _handleFailure(String message) async {
-    if (_disposed || _recovering) return;
+    if (_disposed) return;
+    if (_recovering) {
+      // 降级期间的错误不直接吞掉：先记下来，结束后再判断要不要重放。
+      _pendingFailure = message;
+      _pendingFailureAt = environment.now();
+      return;
+    }
     _recovering = true;
     try {
-      String lastError = message;
-      while (true) {
-        final FallbackTarget? next = await _nextFallback();
-        if (next == null) {
-          _fallbackTrying = null;
-          _error = lastError;
-          _starting = false;
-          _emit();
-          return;
-        }
-        final bool opened = await _applyFallback(next);
-        if (opened) {
-          // 打开成功，等后续的 error 流；没再报错就算救回来了。
-          _fallbackTrying = null;
-          _emit();
-          return;
-        }
-        lastError = '无法打开视频（${next.label}）';
-      }
+      await _runFallbackChain(message);
     } finally {
       _recovering = false;
+    }
+    final String? pending = _pendingFailure;
+    final DateTime? at = _pendingFailureAt;
+    _pendingFailure = null;
+    _pendingFailureAt = null;
+    // 只重放「最近一次 open 之后」发生的错误：那属于新媒体；
+    // 更早的错误属于已被替换的旧媒体，直接丢弃。
+    if (pending != null &&
+        at != null &&
+        !_disposed &&
+        at.isAfter(_lastOpenAt)) {
+      await _handleFailure(pending);
+    }
+  }
+
+  /// 沿降级链逐个尝试，直到打开成功或候选用尽。
+  Future<void> _runFallbackChain(String message) async {
+    String lastError = message;
+    while (true) {
+      final FallbackTarget? next = await _nextFallback();
+      if (next == null) {
+        _fallbackTrying = null;
+        _error = lastError;
+        _starting = false;
+        _emit();
+        return;
+      }
+      final bool opened = await _applyFallback(next);
+      if (opened) {
+        // 打开成功，等后续的 error 流；没再报错就算救回来了。
+        _fallbackTrying = null;
+        _emit();
+        return;
+      }
+      lastError = '无法打开视频（${next.label}）';
     }
   }
 
@@ -982,7 +1075,11 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   }
 
   /// 应用一个降级候选并打开。返回 false 表示打开失败。
+  ///
+  /// 已经播出一段进度时，会把进度带到新地址上继续播，避免用户被
+  /// 降级后从头看起。
   Future<bool> _applyFallback(FallbackTarget target) async {
+    final Duration resumeAt = _position;
     if (target is SourceFallback) {
       _task = _task.copyWith(
         source: target.source,
@@ -999,7 +1096,25 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
 
     final String? url = resolveRawUrl(target.url);
     if (url == null) return false;
-    return _openUrl(url);
+    final bool opened = await _openUrl(url);
+    if (opened &&
+        target is UrlFallback &&
+        target.lineIndex != null &&
+        target.episodeIndex != null) {
+      // 换到了别的线路：同步任务定位，否则历史记录与选集面板
+      // 仍指向原来那条坏线路。降级链本身不重建，继续按原顺序走。
+      _task = _task.copyWith(
+        lineIndex: target.lineIndex,
+        episodeIndex: target.episodeIndex,
+      );
+      _emit();
+    }
+    if (opened && !_disposed && resumeAt > K.resumeSeekThreshold) {
+      // 显式续播后关掉自动续播，避免两个 seek 打架。
+      _resumeApplied = true;
+      await _player.seek(resumeAt);
+    }
+    return opened;
   }
 
   /// 设置一次性提示，几秒后自动消失。
@@ -1087,6 +1202,17 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
   }
 
   void _onCompleted() {
+    // 坏流 / 被截断的流会提前 EOF，mpv 照样发 completed。
+    // 时长未知或进度明显没到结尾时，不当作播完，既不标记已看完
+    // 也不自动跳下一集。
+    final bool reallyFinished = _duration.inMilliseconds > 0 &&
+        _position.inMilliseconds >=
+            _duration.inMilliseconds * K.finishRatio;
+    if (!reallyFinished) {
+      AppLog.d('Player',
+          'completed ignored: position=$_position duration=$_duration');
+      return;
+    }
     _writeHistory(force: true, finished: true);
     // 「本集播完关」优先于自动连播：用户要的是停下来，不是继续放。
     if (_sleepAtEnd) {
@@ -1188,6 +1314,9 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     if (episodeIndex < 0 || episodeIndex >= count) return;
 
     _task = _task.copyWith(lineIndex: lineIndex, episodeIndex: episodeIndex);
+    // 新的一集重新给满跨源降级额度：上一集用掉的机会不该连累这一集。
+    _crossSourceCount = 0;
+    _triedSourceIds.clear();
     _emit();
     await _openCurrent();
   }
@@ -1571,6 +1700,8 @@ class PlayerController extends ChangeNotifier implements PlayerControlsBinding {
     _disposed = true;
     _startupTimer?.cancel();
     _startupTimer = null;
+    _stallTimer?.cancel();
+    _stallTimer = null;
     _noticeTimer?.cancel();
     _noticeTimer = null;
     _sleepTick?.cancel();

@@ -107,11 +107,23 @@ class FakePlatformPlayer extends PlatformPlayer {
 
   // ------------------------------------------------------------ 推流
 
+  Duration _lastDuration = Duration.zero;
+
   void emitPosition(Duration v) => positionController.add(v);
-  void emitDuration(Duration v) => durationController.add(v);
+  void emitDuration(Duration v) {
+    _lastDuration = v;
+    durationController.add(v);
+  }
   void emitPlaying(bool v) => playingController.add(v);
   void emitBuffering(bool v) => bufferingController.add(v);
-  void emitCompleted(bool v) => completedController.add(v);
+  void emitCompleted(bool v) {
+    // 真实内核走到 EOF 时进度已经在结尾附近；「播完」判定要求
+    // 进度接近总时长，这里复现这个顺序。
+    if (v && _lastDuration > Duration.zero) {
+      positionController.add(_lastDuration);
+    }
+    completedController.add(v);
+  }
   void emitRate(double v) => rateController.add(v);
   void emitVolume(double v) => volumeController.add(v);
   void emitError(String v) => errorController.add(v);

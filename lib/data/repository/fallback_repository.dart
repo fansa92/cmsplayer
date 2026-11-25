@@ -23,7 +23,18 @@ sealed class FallbackTarget {
 
 /// 换地址：同一集的备用地址，或同源其它线路里的同一集。
 class UrlFallback extends FallbackTarget {
-  const UrlFallback(super.url, super.label);
+  const UrlFallback(
+    super.url,
+    super.label, {
+    this.lineIndex,
+    this.episodeIndex,
+  });
+
+  /// 候选所在的线路 / 集下标。换线路时用来同步任务定位，
+  /// 让历史记录与选集面板指向真正在播的那条线路；
+  /// 当前集自己的备用地址不需要改定位，保持 null。
+  final int? lineIndex;
+  final int? episodeIndex;
 }
 
 /// 换源：另一个资源站里的同名影片。
@@ -93,11 +104,21 @@ class FallbackResolver {
       final int index = _matchEpisode(line, episodeName);
       if (index < 0) continue;
       final PlayEpisode episode = line.episodes[index];
-      result.add(UrlFallback(episode.url, '线路「${line.name}」'));
+      result.add(UrlFallback(
+        episode.url,
+        '线路「${line.name}」',
+        lineIndex: i,
+        episodeIndex: index,
+      ));
       for (final String raw in episode.mirrors) {
         final String url = raw.trim();
         if (url.isEmpty) continue;
-        result.add(UrlFallback(url, '线路「${line.name}」的备用地址'));
+        result.add(UrlFallback(
+          url,
+          '线路「${line.name}」的备用地址',
+          lineIndex: i,
+          episodeIndex: index,
+        ));
       }
     }
     return result;
@@ -110,14 +131,16 @@ class FallbackResolver {
   /// 宁可漏掉一次跨源切换，也不要把用户带到另一部片子上。
   static Future<List<SourceFallback>> crossSource(
     PlayTask task,
-    List<VodSource> sources,
-  ) async {
+    List<VodSource> sources, {
+    int maxSearchSources = _maxSearchSources,
+    int maxResults = _maxResults,
+  }) async {
     final String title = task.item.name.trim();
     if (title.isEmpty || sources.isEmpty) {
       return const <SourceFallback>[];
     }
 
-    final List<VodSource> targets = sources.take(_maxSearchSources).toList();
+    final List<VodSource> targets = sources.take(maxSearchSources).toList();
     final List<VodPage> pages = await Future.wait(
       targets.map((VodSource s) async {
         try {
@@ -167,7 +190,7 @@ class FallbackResolver {
             episodeIndex: match.episodeIndex,
           ),
         );
-        if (result.length >= _maxResults) return result;
+        if (result.length >= maxResults) return result;
       }
     }
     return result;

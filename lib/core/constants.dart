@@ -87,6 +87,12 @@ class K {
   /// 降级提示在界面上停留的时长。
   static const Duration fallbackNoticeDuration = Duration(seconds: 4);
 
+  /// 播放中缓冲卡死超过该时长就原地重试当前地址。
+  ///
+  /// 网络挂起时 mpv 可能一直不报 error，只有 buffering 常亮；
+  /// 没有这道兜底，中央转圈会永远转下去。
+  static const Duration stallTimeout = Duration(seconds: 15);
+
   /// 桌面迷你窗的初始尺寸。
   static const double miniWindowWidth = 420;
   static const double miniWindowHeight = 236;
@@ -243,8 +249,4 @@ class K {
   /// 官方源列表（json 数组，元素包含 name / api / note）。
   static const String officialSourceListUrl =
       'https://raw.githubusercontent.com/cms-player/vod-source/main/source.json';
-
-  /// 上述链接的国内镜像。
-  static const String officialSourceListMirror =
-      'https://mirror.ghproxy.com/https://raw.githubusercontent.com/cms-player/vod-source/main/source.json';
 }

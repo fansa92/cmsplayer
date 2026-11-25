@@ -417,7 +417,7 @@ class _SourcePageState extends State<SourcePage> {
             ),
             const SizedBox(height: 12),
             Text(
-              '官方源列表：\n${K.officialSourceListUrl}\n\n国内打不开时改用镜像：\n${K.officialSourceListMirror}',
+              '官方源列表：\n${K.officialSourceListUrl}',
               style: Theme.of(ctx).textTheme.labelSmall?.copyWith(
                     color: Theme.of(ctx).colorScheme.onSurfaceVariant,
                     height: 1.5,
