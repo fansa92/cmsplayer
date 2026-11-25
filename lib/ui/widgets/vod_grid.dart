@@ -12,6 +12,7 @@ class VodGrid extends StatefulWidget {
     required this.items,
     required this.onTap,
     this.headers = const <String, String>{},
+    this.headersOf,
     this.onLoadMore,
     this.canLoadMore = false,
     this.loadingMore = false,
@@ -24,7 +25,16 @@ class VodGrid extends StatefulWidget {
 
   final List<VodItem> items;
   final void Function(VodItem item) onTap;
+
+  /// 所有海报共用的请求头（单源列表用）。
   final Map<String, String> headers;
+
+  /// 逐条返回请求头，优先于 [headers]。
+  ///
+  /// 多源聚合结果里每条海报来自不同的源，防盗链站要求 Referer 与源站
+  /// 一致；只传一个共用 map 的话，除代表源之外的海报都会 403。
+  final Map<String, String> Function(VodItem item)? headersOf;
+
   final Future<void> Function()? onLoadMore;
   final bool canLoadMore;
   final bool loadingMore;
@@ -114,7 +124,7 @@ class _VodGridState extends State<VodGrid> {
       final VodItem item = widget.items[index];
       return VodCard(
         item: item,
-        headers: widget.headers,
+        headers: widget.headersOf?.call(item) ?? widget.headers,
         onTap: () => widget.onTap(item),
         progress: widget.progressOf == null ? 0 : widget.progressOf!(item),
         sourceLabel:

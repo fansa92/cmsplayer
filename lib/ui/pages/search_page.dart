@@ -322,6 +322,10 @@ class _SearchPageState extends State<SearchPage>
                 return n > 1 ? '${s.name} · $n 源' : s.name;
               }
             : (VodItem item) => '',
+        // 海报按各自来源站带 Referer：多源结果里每条可能来自不同站点，
+        // 共用一份 headers 会让防盗链站的海报整片挂掉。
+        headersOf: (VodItem item) =>
+            store.sourceOf(item)?.headers ?? const <String, String>{},
         onTap: (VodItem item) {
           final VodSource? source = store.sourceOf(item) ?? sourceStore.active;
           if (source == null) return;

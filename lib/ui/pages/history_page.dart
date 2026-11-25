@@ -89,6 +89,33 @@ class _HistoryPageState extends State<HistoryPage> {
     AppActions.snack(context, '已删除 $count 条记录');
   }
 
+  /// 单条滑动删除前确认。
+  ///
+  /// 滑动是很容易误触的手势，而删除会写墓碑、连带清掉其它设备上的记录，
+  /// 没有确认就相当于"划一下全端消失"。这里和批量删除保持同一道护栏。
+  Future<bool> _confirmDeleteOne(PlayRecord record) async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('删除这条观看记录？'),
+        content: Text(
+          '「${record.vodName}」的续播进度会一并删除，其它设备上的同名记录也会被同步删除。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final HistoryStore history = context.watch<HistoryStore>();
@@ -147,6 +174,7 @@ class _HistoryPageState extends State<HistoryPage> {
                 direction: _selecting
                     ? DismissDirection.none
                     : DismissDirection.endToStart,
+                confirmDismiss: (_) => _confirmDeleteOne(record),
                 background: Container(
                   alignment: Alignment.centerRight,
                   padding: const EdgeInsets.only(right: 18),

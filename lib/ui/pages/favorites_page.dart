@@ -67,10 +67,17 @@ class _FavoritesPageState extends State<FavoritesPage> {
       );
     }
 
-    final Map<int, FavoriteItem> byVodId = <int, FavoriteItem>{
-      for (final FavoriteItem f in visible)
-        if (int.tryParse(f.vodId) != null) int.parse(f.vodId): f,
-    };
+    // 一条收藏 = 一个海报。不能用 vodId 当键：不同源的同 ID 影片会互相
+    // 覆盖，角标和点击都会挂到错误的卡片上。这里让每张卡片持有自己的
+    // VodItem 实例，再用 identity map 找回对应的收藏。
+    final List<VodItem> items = <VodItem>[];
+    final Map<VodItem, FavoriteItem> byItem =
+        Map<VodItem, FavoriteItem>.identity();
+    for (final FavoriteItem f in visible) {
+      final VodItem item = _toItem(f);
+      items.add(item);
+      byItem[item] = f;
+    }
 
     if (visible.isEmpty) {
       return Column(
@@ -124,17 +131,17 @@ class _FavoritesPageState extends State<FavoritesPage> {
         ),
         Expanded(
           child: VodGrid(
-            items: visible.map(_toItem).toList(),
+            items: items,
             sourceLabelOf: (VodItem item) =>
-                _sourceNameOf(sourceStore, byVodId[item.id]?.sourceId ?? ''),
+                _sourceNameOf(sourceStore, byItem[item]?.sourceId ?? ''),
             updateLabelOf: (VodItem item) {
-              final FavoriteItem? fav = byVodId[item.id];
+              final FavoriteItem? fav = byItem[item];
               if (fav == null || !favorites.hasUpdate(fav.key)) return null;
               final int? latest = favorites.latestEpisodesOf(fav.key);
               return latest == null ? '有更新' : '更新至 $latest 集';
             },
             onTap: (VodItem item) async {
-              final FavoriteItem? fav = byVodId[item.id];
+              final FavoriteItem? fav = byItem[item];
               final VodSource? source =
                   fav == null ? null : _sourceById(sourceStore, fav.sourceId);
               if (source == null) {

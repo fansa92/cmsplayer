@@ -13,7 +13,6 @@ class GroupedVodGrid extends StatefulWidget {
     super.key,
     required this.hits,
     required this.onTap,
-    this.headers = const <String, String>{},
     this.onLoadMore,
     this.canLoadMore = false,
     this.loadingMore = false,
@@ -22,7 +21,6 @@ class GroupedVodGrid extends StatefulWidget {
 
   final List<SourceHit> hits;
   final void Function(SourceHit hit, int index) onTap;
-  final Map<String, String> headers;
   final Future<void> Function()? onLoadMore;
   final bool canLoadMore;
   final bool loadingMore;
@@ -95,7 +93,9 @@ class _GroupedVodGridState extends State<GroupedVodGrid> {
             itemCount: hit.items.length,
             itemBuilder: (BuildContext context, int index) => VodCard(
               item: hit.items[index],
-              headers: widget.headers,
+              // 每组就是一个源，用该源自己的 Referer / UA，
+              // 防盗链站才不会把整组海报拒掉。
+              headers: hit.source.headers,
               onTap: () => widget.onTap(hit, index),
             ),
           ),

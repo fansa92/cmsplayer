@@ -243,6 +243,22 @@ class _DetailPageState extends State<DetailPage> {
     final Widget side = _buildSide(theme, isFavorite, favorites, record);
     final List<Widget> mainSlivers = <Widget>[
       SliverToBoxAdapter(child: _buildHeader(theme)),
+      // 窄屏没有左右分栏，侧栏里的「播放 / 收藏」必须排到选集前面：
+      // 长剧动辄上千集按钮，放在选集之后等于把播放键埋到页面底部。
+      // 海报交给顶部的 SliverAppBar 展示，这里只放操作区。
+      if (!context.useDetailTwoPane)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 20),
+            child: _buildSide(
+              theme,
+              isFavorite,
+              favorites,
+              record,
+              showPoster: false,
+            ),
+          ),
+        ),
       ..._buildEpisodeSlivers(theme, record),
       if (_similar.isNotEmpty)
         SliverToBoxAdapter(child: _buildSimilar(theme)),
@@ -298,13 +314,7 @@ class _DetailPageState extends State<DetailPage> {
                       ),
                     ],
                   )
-                : SliverMainAxisGroup(
-                    slivers: <Widget>[
-                      ...mainSlivers,
-                      const SliverToBoxAdapter(child: SizedBox(height: 20)),
-                      SliverToBoxAdapter(child: side),
-                    ],
-                  ),
+                : SliverMainAxisGroup(slivers: mainSlivers),
           ),
         ],
       ),
@@ -470,8 +480,9 @@ class _DetailPageState extends State<DetailPage> {
     ThemeData theme,
     bool isFavorite,
     FavoritesStore favorites,
-    PlayRecord? record,
-  ) {
+    PlayRecord? record, {
+    bool showPoster = true,
+  }) {
     final bool canResume = record != null &&
         !record.finished &&
         record.positionMs > 0 &&
@@ -480,18 +491,20 @@ class _DetailPageState extends State<DetailPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: AspectRatio(
-            aspectRatio: 2 / 3,
-            child: CachedImage(
-              url: _item.pic,
-              headers: widget.source.headers,
-              fit: BoxFit.cover,
+        if (showPoster) ...<Widget>[
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: AspectRatio(
+              aspectRatio: 2 / 3,
+              child: CachedImage(
+                url: _item.pic,
+                headers: widget.source.headers,
+                fit: BoxFit.cover,
+              ),
             ),
           ),
-        ),
-        const SizedBox(height: 16),
+          const SizedBox(height: 16),
+        ],
         FilledButton.icon(
           style: FilledButton.styleFrom(
             minimumSize: const Size(0, 46),
@@ -503,10 +516,15 @@ class _DetailPageState extends State<DetailPage> {
               canResume ? '继续播放' : (_item.hasPlayInfo ? '立即播放' : '暂无可播放内容')),
           onPressed: _item.hasPlayInfo
               ? () {
-                  final int li = canResume
-                      ? _clamp(record.lineIndex, _item.playLines.length)
-                      : (_lineIndex < _item.playLines.length ? _lineIndex : 0);
-                  final int ei = canResume ? record.episodeIndex : 0;
+                  final List<PlayLine> lines = _item.playLines;
+                  // 以用户当前选中的线路为准，而不是播放记录里的旧线路：
+                  // 在选集区切过线路后点「继续播放」，不该被弹回原来那条。
+                  final int li = _clamp(_lineIndex, lines.length);
+                  // 记录里的集号可能超出该线路现在的集数（源站删过集），
+                  // 不 clamp 会直接构造出越界的 PlayTask。
+                  final int ei = canResume
+                      ? _clamp(record.episodeIndex, lines[li].episodes.length)
+                      : 0;
                   _play(li, ei);
                 }
               : null,

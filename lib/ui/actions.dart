@@ -110,11 +110,16 @@ class AppActions {
       if (!context.mounted) return;
       dismissRoute(context, loading);
 
+      final int line = _clampIndex(lineIndex, detail.playLines.length);
+      final int episodes = detail.playLines.isEmpty
+          ? 0
+          : detail.playLines[line].episodes.length;
       final PlayTask task = PlayTask(
         source: source,
         item: detail,
-        lineIndex: _clampIndex(lineIndex, detail.playLines.length),
-        episodeIndex: episodeIndex,
+        lineIndex: line,
+        // 源站可能删过集，记录里的集号不一定还落在新列表里。
+        episodeIndex: _clampIndex(episodeIndex, episodes),
       );
       await AppRoutes.openPlayer(context, task: task);
     } on Object catch (e) {
